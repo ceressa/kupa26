@@ -736,6 +736,62 @@ table.standings {
 .pred-row-teams small { display: block; color: var(--muted); font-weight: 500; font-size: 11.5px; margin-top: 2px; }
 .pred-row-val { font-weight: 800; font-variant-numeric: tabular-nums; }
 
+/* ---------- Lig ---------- */
+.join-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  margin-top: 24px;
+}
+.join-emoji { font-size: 44px; }
+.join-card h2 { font-size: 20px; margin: 10px 0 8px; }
+.join-card p { font-size: 13.5px; color: var(--muted); line-height: 1.6; margin-bottom: 18px; }
+.join-card input {
+  display: block;
+  width: 100%;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+.join-card input:focus { outline: none; border-color: var(--accent); }
+
+.league-row.me {
+  border-color: color-mix(in srgb, var(--fav) 55%, var(--border));
+  background: color-mix(in srgb, var(--fav) 8%, var(--card));
+}
+.league-row { cursor: pointer; }
+.me-tag {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 6px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  font-family: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tab { font-size: 10px; }
+.tab svg { width: 21px; height: 21px; }
+
 .grp-tag { color: var(--muted); font-weight: 600; font-size: 10.5px; }
 .grp-sub { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: none; letter-spacing: 0; }
 .standings tr[data-teampage] { cursor: pointer; }

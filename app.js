@@ -47,6 +47,9 @@ const state = {
   favs: store.get("favs", ["465"]),
   filter: store.get("filter", "all"),
   preds: store.get("preds", {}),
+  lig: store.get("lig", null),
+  league: null,
+  leagueAt: 0,
   notif: store.get("notif", { enabled: false, scope: "favs" }),
   theme: store.get("theme", "auto"),
   snapshot: store.get("snapshot", {}),
@@ -414,6 +417,34 @@ function predTotals() {
   return { pts, played, exact, total };
 }
 
+/* lig: bir kullanıcının bulut tahminlerinden puan hesabı.
+   Maç başladıktan sonra yazılmış tahminler (sunucu damgasına göre) sayılmaz. */
+function predValid(m, p) {
+  return !p.tMillis || p.tMillis <= new Date(m.date).getTime();
+}
+function leagueScore(predsMap) {
+  let pts = 0, exact = 0, played = 0, total = 0;
+  for (const m of state.matches) {
+    const p = predsMap[m.id];
+    if (!p || !predValid(m, p)) continue;
+    total++;
+    const sc = predPoints(m, p);
+    if (sc === null) continue;
+    played++;
+    pts += sc;
+    if (sc === 3) exact++;
+  }
+  return { pts, exact, played, total };
+}
+
+async function loadLeague(force) {
+  if (!window.lig || !state.lig) return;
+  const now = Date.now();
+  if (!force && state.league && now - state.leagueAt < 60_000) return;
+  state.league = await window.lig.fetchLeague();
+  state.leagueAt = now;
+}
+
 function renderGroups() {
   if (!state.standings) { view.innerHTML = loadingHTML(); return; }
   let groups = [...state.standings];
@@ -546,11 +577,53 @@ function renderScorers() {
 function loadingHTML() { return `<div class="loading"><div class="spinner"></div>Yükleniyor...</div>`; }
 function emptyHTML(ico, msg) { return `<div class="empty-state"><div class="big">${ico}</div>${esc(msg)}</div>`; }
 
+function renderLeague() {
+  if (!window.lig) {
+    view.innerHTML = loadingHTML();
+    window.addEventListener("lig-ready", () => { if (state.tab === "league") refreshForTab(); }, { once: true });
+    return;
+  }
+  if (!state.lig) {
+    view.innerHTML = `
+      <div class="join-card">
+        <div class="join-emoji">🏅</div>
+        <h2>Tahmin Ligi</h2>
+        <p>Takma adınla katıl, tahminlerinle arkadaşlarına karşı yarış. Doğru skor 3 puan, doğru sonuç 1 puan. Başkalarının tahminleri maç başlayana kadar gizli kalır.</p>
+        <input id="ligName" type="text" maxlength="20" placeholder="Takma adın (örn. Ufuk)" autocomplete="nickname">
+        <button id="ligJoin" class="pred-save">Lige Katıl</button>
+        <div class="pred-note" id="ligErr"></div>
+      </div>`;
+    return;
+  }
+  if (!state.league) { view.innerHTML = loadingHTML(); return; }
+
+  const me = window.lig.myUid();
+  const rows = state.league
+    .map((u) => ({ ...u, score: leagueScore(u.preds) }))
+    .sort((a, b) => b.score.pts - a.score.pts || b.score.exact - a.score.exact || b.score.total - a.score.total);
+
+  let html = `<div class="section-title">🏅 Tahmin Ligi · ${rows.length} oyuncu</div>`;
+  rows.forEach((u, i) => {
+    const mine = u.uid === me;
+    html += `<div class="scorer-row league-row ${mine ? "me" : ""}" data-liguser="${esc(u.uid)}">
+      <div class="scorer-rank ${i < 3 ? "top" : ""}">${i + 1}</div>
+      <div class="scorer-info">
+        <div class="scorer-name">${esc(u.name)}${mine ? ' <span class="me-tag">sen</span>' : ""}</div>
+        <div class="scorer-team">${u.score.exact} tam isabet · ${u.score.total} tahmin</div>
+      </div>
+      <div><div class="scorer-goals">${u.score.pts}</div><div class="scorer-sub">puan</div></div>
+    </div>`;
+  });
+  html += `<div class="attribution">Adını değiştirmek için tekrar katıl: <button class="link-btn" id="ligRename">takma adı değiştir</button></div>`;
+  view.innerHTML = html;
+}
+
 function render() {
   if (state.tab === "matches") renderMatches();
   else if (state.tab === "groups") renderGroups();
   else if (state.tab === "bracket") renderBracket();
   else if (state.tab === "scorers") renderScorers();
+  else if (state.tab === "league") renderLeague();
 }
 
 /* ============ Maç detayı ============ */
@@ -691,6 +764,11 @@ async function openMatch(id, silent) {
         state.preds[save.dataset.predMatch] = { h, a };
         store.set("preds", state.preds);
         save.textContent = "Kaydedildi ✓";
+        if (state.lig && window.lig) {
+          window.lig.savePred(save.dataset.predMatch, h, a)
+            .then(() => { state.leagueAt = 0; })
+            .catch(() => { save.textContent = "Kaydedildi (lige gönderilemedi)"; });
+        }
         if (state.tab === "matches") render();
       }
     };
@@ -928,11 +1006,78 @@ view.addEventListener("click", (e) => {
     return;
   }
   if (e.target.closest("#predChip")) { openPredictions(); return; }
+  if (e.target.closest("#ligJoin")) { joinLeague(); return; }
+  if (e.target.closest("#ligRename")) { state.lig = null; render(); return; }
+  const lrow = e.target.closest("[data-liguser]");
+  if (lrow) { openLeagueUser(lrow.dataset.liguser); return; }
   const trow = e.target.closest("[data-teampage]");
   if (trow) { openTeam(trow.dataset.teampage); return; }
   const card = e.target.closest("[data-match]");
   if (card) openMatch(card.dataset.match);
 });
+
+async function joinLeague() {
+  const input = $("#ligName");
+  const err = $("#ligErr");
+  const name = (input.value || "").trim();
+  if (name.length < 2) { err.textContent = "En az 2 karakterlik bir ad gir."; return; }
+  const btn = $("#ligJoin");
+  btn.textContent = "Katılıyor...";
+  try {
+    await window.lig.join(name);
+    state.lig = { name };
+    store.set("lig", state.lig);
+    // mevcut yerel tahminleri buluta taşı (başlamamış maçlar geçerli sayılır)
+    for (const [mid, p] of Object.entries(state.preds)) {
+      try { await window.lig.savePred(mid, p.h, p.a); } catch {}
+    }
+    await loadLeague(true);
+    render();
+  } catch (ex) {
+    btn.textContent = "Lige Katıl";
+    err.textContent = "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
+  }
+}
+
+function openLeagueUser(uid) {
+  const u = (state.league || []).find((x) => x.uid === uid);
+  if (!u) return;
+  const mine = uid === window.lig.myUid();
+  const now = Date.now();
+  const rows = state.matches
+    .filter((m) => u.preds[m.id])
+    .map((m) => {
+      const p = u.preds[m.id];
+      const started = new Date(m.date).getTime() <= now;
+      const hidden = !started && !mine;
+      const valid = predValid(m, p);
+      const sc = valid ? predPoints(m, p) : null;
+      const badge = !valid && started
+        ? `<span class="pp pp0">geçersiz</span>`
+        : sc === null ? `<span class="pp ppwait">${started ? "oynanıyor" : "bekliyor"}</span>`
+        : sc === 3 ? `<span class="pp pp3">+3</span>` : sc === 1 ? `<span class="pp pp1">+1</span>` : `<span class="pp pp0">0</span>`;
+      const actual = m.state === "pre" ? fmtTime(m.date) : `${m.home.score ?? ""} - ${m.away.score ?? ""}`;
+      return `<div class="pred-row" data-match="${m.id}">
+        <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${new Date(m.date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} · ${esc(actual)}</small></div>
+        <div class="pred-row-val">${hidden ? "🔒" : `${p.h} - ${p.a}`}</div>
+        ${hidden ? `<span class="pp ppwait">gizli</span>` : badge}
+      </div>`;
+    }).join("");
+  const s = leagueScore(u.preds);
+  openSheet(`
+    <div class="set-title">🏅 ${esc(u.name)}${mine ? ' <span class="me-tag">sen</span>' : ""}</div>
+    <div class="pred-summary">
+      <div><b>${s.pts}</b><small>puan</small></div>
+      <div><b>${s.exact}</b><small>tam isabet</small></div>
+      <div><b>${s.total}</b><small>tahmin</small></div>
+    </div>
+    ${rows || emptyHTML("🎯", "Henüz tahmini yok.")}
+    ${mine ? "" : `<div class="pred-note">🔒 Başkalarının tahminleri maç başlayana kadar gizlidir.</div>`}`);
+  $("#sheetContent").onclick = (e) => {
+    const card = e.target.closest("[data-match]");
+    if (card) openMatch(card.dataset.match);
+  };
+}
 
 $("#sheetOverlay").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeSheet(); });
 $("#btnSettings").addEventListener("click", async () => {
@@ -950,6 +1095,7 @@ async function refreshForTab(force) {
     if (state.tab === "matches" || state.tab === "bracket") { await loadMatches(force); }
     else if (state.tab === "groups") { await loadStandings(force); }
     else if (state.tab === "scorers") { await loadScorers(force); }
+    else if (state.tab === "league") { await loadMatches(); await loadLeague(force); }
     render();
   } catch (err) {
     if (!state.matches.length && state.tab !== "groups") view.innerHTML = emptyHTML("📡", "Veri alınamadı. İnternet bağlantını kontrol edip yenile.");
