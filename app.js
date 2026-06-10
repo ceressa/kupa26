@@ -1171,6 +1171,19 @@ view.addEventListener("click", (e) => {
   if (card) openMatch(card.dataset.match);
 });
 
+async function joinWithName(name) {
+  await window.lig.join(name);
+  state.lig = { name };
+  store.set("lig", state.lig);
+  // mevcut yerel tahminleri buluta taşı (başlamamış maçlar geçerli sayılır)
+  for (const [mid, p] of Object.entries(state.preds)) {
+    try { await window.lig.savePred(mid, p.h, p.a); } catch {}
+  }
+  for (const [key, p] of Object.entries(state.picks)) {
+    try { await window.lig.savePick(key, { ...p }); } catch {}
+  }
+}
+
 async function joinLeague() {
   const input = $("#ligName");
   const err = $("#ligErr");
@@ -1179,19 +1192,63 @@ async function joinLeague() {
   const btn = $("#ligJoin");
   btn.textContent = "Katılıyor...";
   try {
-    await window.lig.join(name);
-    state.lig = { name };
-    store.set("lig", state.lig);
-    // mevcut yerel tahminleri buluta taşı (başlamamış maçlar geçerli sayılır)
-    for (const [mid, p] of Object.entries(state.preds)) {
-      try { await window.lig.savePred(mid, p.h, p.a); } catch {}
-    }
+    await joinWithName(name);
     await loadLeague(true);
     render();
   } catch (ex) {
     btn.textContent = "Lige Katıl";
     err.textContent = "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
   }
+}
+
+/* ============ İlk açılış karşılaması ============ */
+function maybeOnboard() {
+  if (store.get("onboarded", false) || state.lig) return;
+  const ob = document.createElement("div");
+  ob.id = "onboard";
+  ob.innerHTML = `
+    <div class="ob-card">
+      <div class="ob-ball">⚽</div>
+      <h1>Kupa<b>26</b>'ya hoş geldin!</h1>
+      <p class="ob-sub">2026 Dünya Kupası başlıyor. Canlı skorlar, fikstür, puan durumları ve arkadaşlarınla tahmin ligi seni bekliyor.</p>
+      <ul class="ob-feats">
+        <li>🎯 Maçlara skor tahmini gir, puan topla</li>
+        <li>🏆 Şampiyonu ve gruplardan çıkacakları seç</li>
+        <li>🏅 Liderlik tablosunda arkadaşlarınla yarış</li>
+        <li>🔔 Gol ve maç bildirimleri al</li>
+      </ul>
+      <input id="obName" type="text" maxlength="20" placeholder="Takma adın (ligde görünecek)" autocomplete="nickname">
+      <button id="obJoin" class="pred-save">Başla 🚀</button>
+      <div class="pred-note" id="obErr"></div>
+      <button class="link-btn ob-skip" id="obSkip">Şimdilik atla, sadece skorları izleyeceğim</button>
+    </div>`;
+  document.body.appendChild(ob);
+
+  ob.addEventListener("click", async (e) => {
+    if (e.target.closest("#obSkip")) {
+      store.set("onboarded", true);
+      ob.remove();
+      return;
+    }
+    if (!e.target.closest("#obJoin")) return;
+    const name = ($("#obName").value || "").trim();
+    const err = $("#obErr");
+    if (name.length < 2) { err.textContent = "En az 2 karakterlik bir ad gir."; return; }
+    const btn = $("#obJoin");
+    btn.textContent = "Katılıyor...";
+    try {
+      if (!window.lig) await new Promise((r) => window.addEventListener("lig-ready", r, { once: true }));
+      await joinWithName(name);
+      store.set("onboarded", true);
+      ob.remove();
+      loadLeague(true).then(() => { if (state.tab === "league") render(); }).catch(() => {});
+      // ilk iş: turnuva tahminlerini önüne aç
+      openPicks();
+    } catch (ex) {
+      btn.textContent = "Başla 🚀";
+      err.textContent = "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
+    }
+  });
 }
 
 function openLeagueUser(uid) {
@@ -1331,4 +1388,5 @@ if ("serviceWorker" in navigator) {
   await refreshForTab(true);
   loadStandings().catch(() => {});
   setInterval(poll, 10_000);
+  maybeOnboard();
 })();
