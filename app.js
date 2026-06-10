@@ -45,6 +45,8 @@ const state = {
   standingsAt: 0,
   scorersAt: 0,
   favs: store.get("favs", ["465"]),
+  filter: store.get("filter", "all"),
+  preds: store.get("preds", {}),
   notif: store.get("notif", { enabled: false, scope: "favs" }),
   theme: store.get("theme", "auto"),
   snapshot: store.get("snapshot", {}),
@@ -262,10 +264,18 @@ function matchCardHTML(m) {
     const statusTxt = live ? (m.clock || "CANLI") : "MS";
     mid = `<div class="mc-score">${esc(m.home.score ?? "")} - ${esc(m.away.score ?? "")}</div><div class="mc-status ${statusCls}">${esc(statusTxt)}</div>`;
   }
+  const p = state.preds[m.id];
+  let predHTML = "";
+  if (p) {
+    const sc = predPoints(m, p);
+    const badge = sc === null ? "" : sc === 3 ? ` <b class="pp pp3">+3</b>` : sc === 1 ? ` <b class="pp pp1">+1</b>` : ` <b class="pp pp0">0</b>`;
+    predHTML = `<div class="mc-meta">🎯 Tahminin: ${p.h} - ${p.a}${badge}</div>`;
+  }
   return `<div class="match-card ${fav ? "fav" : ""} ${live ? "live" : ""}" data-match="${m.id}">
     ${teamRowHTML(m.home, "home")}
     <div class="mc-mid">${mid}</div>
     ${teamRowHTML(m.away, "away")}
+    ${predHTML}
   </div>`;
 }
 
@@ -292,16 +302,36 @@ function renderMatches() {
   if (!state.matches.length) { view.innerHTML = loadingHTML(); return; }
   let html = "";
   const now = Date.now();
+  const todayK = dayKey(now);
+
+  // filtre çubuğu + tahmin puanı
+  const t = predTotals();
+  html += `<div class="matches-top">
+    <div class="seg filter-seg" id="segFilter">
+      <button data-filter="all" class="${state.filter === "all" ? "on" : ""}">Tümü</button>
+      <button data-filter="favs" class="${state.filter === "favs" ? "on" : ""}">⭐ Favoriler</button>
+      <button data-filter="today" class="${state.filter === "today" ? "on" : ""}">Bugün</button>
+    </div>
+    ${t.total ? `<button class="pred-chip" id="predChip">🎯 <b>${t.pts}</b> puan<small>${t.played}/${t.total} maç · ${t.exact} tam isabet</small></button>` : ""}
+  </div>`;
 
   // favori hero: canlı favori maç ya da sıradaki favori maç
-  if (state.favs.length) {
+  if (state.favs.length && state.filter !== "today") {
     const favLive = state.matches.find((m) => m.state === "in" && involvesFav(m));
     const favNext = state.matches.find((m) => m.state === "pre" && involvesFav(m));
     const hero = favLive || favNext;
     if (hero) html += heroHTML(hero);
   }
 
-  const live = state.matches.filter((m) => m.state === "in");
+  let list = state.matches;
+  if (state.filter === "favs") list = list.filter(involvesFav);
+  else if (state.filter === "today") list = list.filter((m) => dayKey(m.date) === todayK);
+  if (!list.length) {
+    view.innerHTML = html + emptyHTML("📅", state.filter === "today" ? "Bugün maç yok." : "Favori takımının maçı bulunamadı. Ayarlardan favori ekleyebilirsin.");
+    return;
+  }
+
+  const live = list.filter((m) => m.state === "in");
   if (live.length) {
     html += `<div class="section-title live-title"><span class="live-dot"></span> Şu an oynanıyor</div>`;
     html += live.map(matchCardHTML).join("");
@@ -309,12 +339,11 @@ function renderMatches() {
 
   // günlere göre grupla; varsayılan kaydırma bugüne
   const byDay = new Map();
-  for (const m of state.matches) {
+  for (const m of list) {
     const k = dayKey(m.date);
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(m);
   }
-  const todayK = dayKey(now);
   for (const [k, list] of byDay) {
     const isToday = k === todayK;
     html += `<div class="day-header" id="day-${k}">${fmtDayHeader(list[0].date)}${isToday ? " <small>· Bugün</small>" : ""}</div>`;
@@ -356,6 +385,34 @@ function statVal(entry, ...keys) {
   }
   return "";
 }
+function statNum(entry, ...keys) {
+  const v = parseFloat(statVal(entry, ...keys));
+  return isNaN(v) ? 0 : v;
+}
+
+/* ============ Tahmin oyunu ============ */
+function predPoints(m, p) {
+  if (!p || m.state !== "post") return null;
+  const h = Number(m.home.score), a = Number(m.away.score);
+  if (isNaN(h) || isNaN(a)) return null;
+  if (p.h === h && p.a === a) return 3;
+  if (Math.sign(p.h - p.a) === Math.sign(h - a)) return 1;
+  return 0;
+}
+function predTotals() {
+  let pts = 0, played = 0, exact = 0, total = 0;
+  for (const m of state.matches) {
+    const p = state.preds[m.id];
+    if (!p) continue;
+    total++;
+    const sc = predPoints(m, p);
+    if (sc === null) continue;
+    played++;
+    pts += sc;
+    if (sc === 3) exact++;
+  }
+  return { pts, played, exact, total };
+}
 
 function renderGroups() {
   if (!state.standings) { view.innerHTML = loadingHTML(); return; }
@@ -376,7 +433,7 @@ function renderGroups() {
       const fav = state.favs.includes(String(e.team.id));
       const logo = (e.team.logos && e.team.logos[0] && e.team.logos[0].href) || "";
       const qual = i < 2 ? "qual-1" : i === 2 ? "qual-3" : "";
-      rows += `<tr class="${fav ? "fav-row" : ""}">
+      rows += `<tr class="${fav ? "fav-row" : ""}" data-teampage="${e.team.id}">
         <td class="team-cell"><span class="qual-dot ${qual}"></span>${logo ? `<img src="${esc(logo)}" alt="">` : ""}${esc(trName(e.team))}</td>
         <td>${statVal(e, "gamesPlayed", "GP")}</td>
         <td>${statVal(e, "wins", "W")}</td>
@@ -392,6 +449,37 @@ function renderGroups() {
       <table class="standings">
         <thead><tr><th>Takım</th><th>O</th><th>G</th><th>B</th><th>M</th><th>AV</th><th>P</th></tr></thead>
         <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }
+  // üçüncüler sıralaması: 12 grubun 3.lerinden en iyi 8'i tur atlar
+  const thirds = [];
+  for (const g of state.standings) {
+    const entries = (g.standings && g.standings.entries) || [];
+    if (entries[2]) thirds.push({ e: entries[2], group: (g.name || "").replace(/^Group\s+/i, "") });
+  }
+  if (thirds.length) {
+    thirds.sort((a, b) =>
+      statNum(b.e, "points", "P", "PTS") - statNum(a.e, "points", "P", "PTS") ||
+      statNum(b.e, "pointDifferential", "GD") - statNum(a.e, "pointDifferential", "GD") ||
+      statNum(b.e, "pointsFor", "GF") - statNum(a.e, "pointsFor", "GF"));
+    let trows = "";
+    thirds.forEach((x, i) => {
+      const fav = state.favs.includes(String(x.e.team.id));
+      const logo = (x.e.team.logos && x.e.team.logos[0] && x.e.team.logos[0].href) || "";
+      trows += `<tr class="${fav ? "fav-row" : ""}" data-teampage="${x.e.team.id}">
+        <td class="team-cell"><span class="qual-dot ${i < 8 ? "qual-1" : ""}"></span>${logo ? `<img src="${esc(logo)}" alt="">` : ""}${esc(trName(x.e.team))} <small class="grp-tag">${esc(x.group)}</small></td>
+        <td>${statVal(x.e, "gamesPlayed", "GP")}</td>
+        <td>${statVal(x.e, "pointDifferential", "GD")}</td>
+        <td>${statVal(x.e, "pointsFor", "GF")}</td>
+        <td class="pts">${statVal(x.e, "points", "P", "PTS")}</td>
+      </tr>`;
+    });
+    html += `<div class="group-card">
+      <div class="group-head">Üçüncüler Sıralaması <small class="grp-sub">en iyi 8 takım Son 32'ye kalır</small></div>
+      <table class="standings">
+        <thead><tr><th>Takım</th><th>O</th><th>AV</th><th>AG</th><th>P</th></tr></thead>
+        <tbody>${trows}</tbody>
       </table>
     </div>`;
   }
@@ -497,6 +585,28 @@ async function openMatch(id, silent) {
       ${venue ? `<div class="md-venue">${esc(venue.fullName || "")}${venue.address ? " · " + esc([venue.address.city, venue.address.country].filter(Boolean).join(", ")) : ""}</div>` : ""}
     </div>`;
 
+    // tahmin: maç başlamadıysa düzenlenebilir, sonrasında sonuç gösterimi
+    const myPred = state.preds[id];
+    if (pre) {
+      html += `<div class="md-section">
+        <h3>🎯 Skor Tahminin</h3>
+        <div class="pred-inputs">
+          <span class="pred-team">${esc(trName(home.team))}</span>
+          <input id="predH" type="number" min="0" max="20" inputmode="numeric" value="${myPred ? myPred.h : ""}" placeholder="-">
+          <span class="pred-dash">:</span>
+          <input id="predA" type="number" min="0" max="20" inputmode="numeric" value="${myPred ? myPred.a : ""}" placeholder="-">
+          <span class="pred-team">${esc(trName(away.team))}</span>
+        </div>
+        <button id="predSave" class="pred-save" data-pred-match="${esc(String(id))}">${myPred ? "Tahmini Güncelle" : "Tahmini Kaydet"}</button>
+        <div class="pred-note">Doğru skor 3 puan · doğru sonuç 1 puan</div>
+      </div>`;
+    } else if (myPred) {
+      const mm = state.matches.find((x) => String(x.id) === String(id));
+      const sc = mm ? predPoints(mm, myPred) : null;
+      const badge = sc === null ? "" : sc === 3 ? ` · <b class="pp pp3">+3 puan (tam isabet!)</b>` : sc === 1 ? ` · <b class="pp pp1">+1 puan</b>` : ` · <b class="pp pp0">0 puan</b>`;
+      html += `<div class="md-section"><h3>🎯 Tahminin</h3><div class="pred-result">${myPred.h} - ${myPred.a}${badge}</div></div>`;
+    }
+
     // olaylar: goller ve kartlar
     const details = (comp.details || []).filter((d) => d.scoringPlay || d.redCard || d.yellowCard);
     if (details.length) {
@@ -565,17 +675,130 @@ async function openMatch(id, silent) {
 
   if (!html) html = emptyHTML("📋", "Bu maç için detay henüz yayınlanmadı.");
   const sc = $("#sheetContent");
-  const scrollY = sc.scrollTop;
-  sc.innerHTML = html;
-  sc.scrollTop = scrollY;
+  const st = comp && comp.status && comp.status.type ? comp.status.type.state : "post";
+  const startingSoon = st === "pre" && comp && new Date(comp.date) - Date.now() < 10 * 60 * 1000;
+  const typing = sc.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+
+  if (!(silent && typing)) {
+    const scrollY = sc.scrollTop;
+    sc.innerHTML = html;
+    sc.scrollTop = scrollY;
+    sc.onclick = (e) => {
+      const save = e.target.closest("#predSave");
+      if (save) {
+        const h = parseInt($("#predH").value, 10), a = parseInt($("#predA").value, 10);
+        if (isNaN(h) || isNaN(a) || h < 0 || a < 0 || h > 20 || a > 20) { save.textContent = "Geçerli skor gir"; return; }
+        state.preds[save.dataset.predMatch] = { h, a };
+        store.set("preds", state.preds);
+        save.textContent = "Kaydedildi ✓";
+        if (state.tab === "matches") render();
+      }
+    };
+  }
 
   // canlı maçta açık kalan detay ekranını yenile
   clearTimeout(openMatch._timer);
-  const st = comp && comp.status && comp.status.type ? comp.status.type.state : "post";
-  const startingSoon = st === "pre" && comp && new Date(comp.date) - Date.now() < 10 * 60 * 1000;
   if (st === "in" || startingSoon) {
     openMatch._timer = setTimeout(() => openMatch(id, true), 30_000);
   }
+}
+
+/* ============ Takım sayfası ============ */
+function openTeam(teamId) {
+  teamId = String(teamId);
+  const tinfo = (state.teamsCache || []).find((t) => t.id === teamId);
+  const matches = state.matches.filter((m) => String(m.home.id) === teamId || String(m.away.id) === teamId);
+
+  // takımın grubu
+  let groupHTML = "", groupName = "";
+  for (const g of state.standings || []) {
+    const entries = (g.standings && g.standings.entries) || [];
+    if (!entries.some((e) => String(e.team.id) === teamId)) continue;
+    groupName = (g.name || "").replace(/^Group\s+/i, "") + " Grubu";
+    let rows = "";
+    entries.forEach((e, i) => {
+      const me = String(e.team.id) === teamId;
+      const logo = (e.team.logos && e.team.logos[0] && e.team.logos[0].href) || "";
+      rows += `<tr class="${me ? "fav-row" : ""}">
+        <td class="team-cell"><span class="qual-dot ${i < 2 ? "qual-1" : i === 2 ? "qual-3" : ""}"></span>${logo ? `<img src="${esc(logo)}" alt="">` : ""}${esc(trName(e.team))}</td>
+        <td>${statVal(e, "gamesPlayed", "GP")}</td>
+        <td>${statVal(e, "wins", "W")}</td>
+        <td>${statVal(e, "ties", "D")}</td>
+        <td>${statVal(e, "losses", "L")}</td>
+        <td>${statVal(e, "pointDifferential", "GD")}</td>
+        <td class="pts">${statVal(e, "points", "P", "PTS")}</td>
+      </tr>`;
+    });
+    groupHTML = `<div class="md-section" style="padding:0;overflow:hidden">
+      <table class="standings">
+        <thead><tr><th>Takım</th><th>O</th><th>G</th><th>B</th><th>M</th><th>AV</th><th>P</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+    break;
+  }
+
+  const name = tinfo ? tinfo.name : (matches[0] ? (String(matches[0].home.id) === teamId ? matches[0].home.name : matches[0].away.name) : "Takım");
+  const logo = tinfo ? tinfo.logo : "";
+  const isFav = state.favs.includes(teamId);
+
+  const html = `
+    <div class="md-header">
+      ${logo ? `<img src="${esc(logo)}" alt="" style="width:56px;height:56px;object-fit:contain">` : ""}
+      <div style="font-size:21px;font-weight:800;margin-top:6px">${esc(name)}</div>
+      ${groupName ? `<div class="md-venue">${esc(groupName)}</div>` : ""}
+      <button class="pred-save" id="favToggle" data-fav-team="${esc(teamId)}" style="margin-top:10px">${isFav ? "⭐ Favorilerden çıkar" : "☆ Favorilere ekle"}</button>
+    </div>
+    ${groupHTML}
+    <div class="section-title">Maçları</div>
+    ${matches.map(matchCardHTML).join("") || emptyHTML("📅", "Maç bulunamadı.")}`;
+  openSheet(html);
+
+  $("#sheetContent").onclick = (e) => {
+    const ft = e.target.closest("#favToggle");
+    if (ft) {
+      const id = ft.dataset.favTeam;
+      if (state.favs.includes(id)) state.favs = state.favs.filter((x) => x !== id);
+      else state.favs.push(id);
+      store.set("favs", state.favs);
+      ft.textContent = state.favs.includes(id) ? "⭐ Favorilerden çıkar" : "☆ Favorilere ekle";
+      render();
+      return;
+    }
+    const card = e.target.closest("[data-match]");
+    if (card) openMatch(card.dataset.match);
+  };
+}
+
+/* ============ Tahmin listesi ============ */
+function openPredictions() {
+  const t = predTotals();
+  const rows = state.matches
+    .filter((m) => state.preds[m.id])
+    .map((m) => {
+      const p = state.preds[m.id];
+      const sc = predPoints(m, p);
+      const badge = sc === null ? `<span class="pp ppwait">bekliyor</span>` : sc === 3 ? `<span class="pp pp3">+3</span>` : sc === 1 ? `<span class="pp pp1">+1</span>` : `<span class="pp pp0">0</span>`;
+      const actual = m.state === "pre" ? fmtTime(m.date) : `${m.home.score ?? ""} - ${m.away.score ?? ""}`;
+      return `<div class="pred-row" data-match="${m.id}">
+        <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${new Date(m.date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} · Sonuç: ${esc(actual)}</small></div>
+        <div class="pred-row-val">${p.h} - ${p.a}</div>
+        ${badge}
+      </div>`;
+    }).join("");
+  const html = `
+    <div class="set-title">🎯 Tahminlerin</div>
+    <div class="pred-summary">
+      <div><b>${t.pts}</b><small>puan</small></div>
+      <div><b>${t.exact}</b><small>tam isabet</small></div>
+      <div><b>${t.played}/${t.total}</b><small>sonuçlanan</small></div>
+    </div>
+    ${rows || emptyHTML("🎯", "Henüz tahmin yapmadın. Başlamamış bir maçı açıp skor tahmini gir.")}`;
+  openSheet(html);
+  $("#sheetContent").onclick = (e) => {
+    const card = e.target.closest("[data-match]");
+    if (card) openMatch(card.dataset.match);
+  };
 }
 
 /* ============ Ayarlar ============ */
@@ -696,6 +919,17 @@ document.querySelectorAll(".tab").forEach((b) => {
 });
 
 view.addEventListener("click", (e) => {
+  const fbtn = e.target.closest("#segFilter button");
+  if (fbtn) {
+    state.filter = fbtn.dataset.filter;
+    store.set("filter", state.filter);
+    renderMatches._scrolled = true;
+    render();
+    return;
+  }
+  if (e.target.closest("#predChip")) { openPredictions(); return; }
+  const trow = e.target.closest("[data-teampage]");
+  if (trow) { openTeam(trow.dataset.teampage); return; }
   const card = e.target.closest("[data-match]");
   if (card) openMatch(card.dataset.match);
 });

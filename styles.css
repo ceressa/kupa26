@@ -634,3 +634,108 @@ table.standings {
 }
 
 .attribution { text-align: center; font-size: 11px; color: var(--muted); margin-top: 24px; line-height: 1.6; }
+
+/* ---------- Filtre + tahmin ---------- */
+.matches-top { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.filter-seg button { padding: 10px 6px; }
+
+.pred-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pred-chip b { color: var(--accent); font-size: 15px; }
+.pred-chip small { color: var(--muted); font-weight: 500; }
+
+.pp { font-weight: 800; font-size: 11px; border-radius: 6px; padding: 1px 6px; }
+.pp3 { color: #fff; background: var(--accent2); }
+.pp1 { color: var(--bg); background: var(--accent); }
+.pp0 { color: var(--muted); background: var(--card2); }
+.ppwait { color: var(--muted); background: var(--card2); font-weight: 600; }
+
+.pred-inputs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 6px 0 12px;
+}
+.pred-team { font-size: 12px; font-weight: 700; color: var(--muted); flex: 1; min-width: 0; text-align: center; }
+.pred-dash { font-weight: 800; color: var(--muted); }
+.pred-inputs input {
+  width: 56px; height: 48px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  -moz-appearance: textfield;
+}
+.pred-inputs input::-webkit-outer-spin-button, .pred-inputs input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.pred-inputs input:focus { outline: none; border-color: var(--accent); }
+
+.pred-save {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  color: #1a1404;
+  border: none;
+  border-radius: 10px;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pred-save:active { opacity: 0.85; }
+.pred-note { text-align: center; font-size: 11px; color: var(--muted); margin-top: 8px; }
+.pred-result { text-align: center; font-size: 17px; font-weight: 800; }
+
+.pred-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.pred-summary div {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 8px;
+  text-align: center;
+}
+.pred-summary b { display: block; font-size: 22px; color: var(--accent); }
+.pred-summary small { color: var(--muted); font-size: 11px; }
+
+.pred-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 7px;
+  cursor: pointer;
+  font-size: 13.5px;
+}
+.pred-row-teams { flex: 1; min-width: 0; font-weight: 600; }
+.pred-row-teams small { display: block; color: var(--muted); font-weight: 500; font-size: 11.5px; margin-top: 2px; }
+.pred-row-val { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+.grp-tag { color: var(--muted); font-weight: 600; font-size: 10.5px; }
+.grp-sub { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.standings tr[data-teampage] { cursor: pointer; }
