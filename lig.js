@@ -49,20 +49,33 @@ window.lig = {
     await setDoc(doc(db, "users", u.uid, "preds", String(matchId)), { h, a, t: serverTimestamp() });
   },
 
-  // tum lig verisi: [{uid, name, preds: {matchId: {h, a, tMillis}}}]
+  // turnuva tahmini: key = "group-A".."group-L" -> {first, second} | "champion" -> {team}
+  async savePick(key, data) {
+    const u = await ensureSignedIn();
+    await setDoc(doc(db, "users", u.uid, "picks", String(key)), { ...data, t: serverTimestamp() });
+  },
+
+  // tum lig verisi: [{uid, name, preds: {matchId: {h, a, tMillis}}, picks: {key: {..., tMillis}}}]
   async fetchLeague() {
     await ensureSignedIn();
-    const [usersSnap, predsSnap] = await Promise.all([
+    const [usersSnap, predsSnap, picksSnap] = await Promise.all([
       getDocs(collection(db, "users")),
-      getDocs(collectionGroup(db, "preds"))
+      getDocs(collectionGroup(db, "preds")),
+      getDocs(collectionGroup(db, "picks"))
     ]);
     const byUid = {};
-    usersSnap.forEach((d) => { byUid[d.id] = { uid: d.id, name: d.data().name || "?", preds: {} }; });
+    usersSnap.forEach((d) => { byUid[d.id] = { uid: d.id, name: d.data().name || "?", preds: {}, picks: {} }; });
     predsSnap.forEach((d) => {
       const uid = d.ref.parent.parent.id;
       if (!byUid[uid]) return;
       const v = d.data();
       byUid[uid].preds[d.id] = { h: v.h, a: v.a, tMillis: v.t && v.t.toMillis ? v.t.toMillis() : 0 };
+    });
+    picksSnap.forEach((d) => {
+      const uid = d.ref.parent.parent.id;
+      if (!byUid[uid]) return;
+      const v = d.data();
+      byUid[uid].picks[d.id] = { ...v, tMillis: v.t && v.t.toMillis ? v.t.toMillis() : 0 };
     });
     return Object.values(byUid);
   }

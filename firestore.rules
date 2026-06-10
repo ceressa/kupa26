@@ -14,9 +14,18 @@ service cloud.firestore {
           && request.resource.data.a is int && request.resource.data.a >= 0 && request.resource.data.a <= 20
           && request.resource.data.t == request.time;
       }
+      // turnuva tahminleri: grup cikanlari (group-A..group-L) ve sampiyon (champion)
+      match /picks/{key} {
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.t == request.time;
+      }
     }
     // liderlik tablosu: tum tahminleri tek collection-group sorgusuyla okuma izni
     match /{path=**}/preds/{matchId} {
+      allow read: if request.auth != null;
+    }
+    match /{path=**}/picks/{key} {
       allow read: if request.auth != null;
     }
   }

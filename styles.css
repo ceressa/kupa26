@@ -736,6 +736,55 @@ table.standings {
 .pred-row-teams small { display: block; color: var(--muted); font-weight: 500; font-size: 11.5px; margin-top: 2px; }
 .pred-row-val { font-weight: 800; font-variant-numeric: tabular-nums; }
 
+/* ---------- Turnuva tahminleri ---------- */
+.picks-cta {
+  display: block;
+  width: 100%;
+  background: linear-gradient(135deg, var(--card2), var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  font-family: inherit;
+  text-align: left;
+  padding: 14px 16px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.picks-cta small { display: block; color: var(--muted); font-weight: 500; font-size: 11.5px; margin-top: 3px; }
+
+.pick-grid { grid-template-columns: 1fr 1fr; }
+.pick-chip { position: relative; padding-right: 26px; }
+.pick-chip.locked { opacity: 0.6; cursor: default; }
+.slot-badge {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 800;
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+.slot-badge.s2 { background: var(--muted); color: var(--bg); }
+.pick-chip.hit { border-color: var(--accent2); }
+.pick-chip.hit .slot-badge { background: var(--accent2); color: #fff; }
+.pick-chip.half { border-color: var(--accent); }
+.pick-chip.miss { border-color: var(--live); opacity: 0.75; }
+
+.pick-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding: 5px 0;
+}
+.pick-line span { color: var(--muted); flex-shrink: 0; }
+.pick-line b { text-align: right; }
+
 /* ---------- Lig ---------- */
 .join-card {
   background: var(--card);

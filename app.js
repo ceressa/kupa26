@@ -48,6 +48,8 @@ const state = {
   filter: store.get("filter", "all"),
   preds: store.get("preds", {}),
   lig: store.get("lig", null),
+  picks: store.get("picks", {}),
+  reminded: store.get("reminded", {}),
   league: null,
   leagueAt: 0,
   notif: store.get("notif", { enabled: false, scope: "favs" }),
@@ -445,6 +447,66 @@ async function loadLeague(force) {
   state.leagueAt = now;
 }
 
+/* ============ Turnuva tahminleri (grup çıkanları + şampiyon) ============ */
+function groupLetterOf(g) { return (g.name || "").replace(/^Group\s+/i, ""); }
+
+function groupLockTime(letter) {
+  const g = (state.standings || []).find((x) => groupLetterOf(x) === letter);
+  if (!g) return Infinity;
+  const ids = new Set(((g.standings && g.standings.entries) || []).map((e) => String(e.team.id)));
+  const m = state.matches.find((x) => x.round.key === "group" && (ids.has(String(x.home.id)) || ids.has(String(x.away.id))));
+  return m ? new Date(m.date).getTime() : Infinity;
+}
+function tournamentLockTime() {
+  return state.matches.length ? new Date(state.matches[0].date).getTime() : Infinity;
+}
+
+// grup bitti mi? bittiyse [1.id, 2.id]
+function groupResult(letter) {
+  const g = (state.standings || []).find((x) => groupLetterOf(x) === letter);
+  const entries = (g && g.standings && g.standings.entries) || [];
+  if (entries.length < 2) return null;
+  if (!entries.every((e) => statNum(e, "gamesPlayed", "GP") >= 3)) return null;
+  return [String(entries[0].team.id), String(entries[1].team.id)];
+}
+function championResult() {
+  const f = state.matches.find((m) => m.round.key === "final");
+  if (f && f.state === "post") {
+    const w = f.home.winner ? f.home : f.away.winner ? f.away : null;
+    if (w && !w.tbd) return String(w.id);
+  }
+  return null;
+}
+
+/* Puanlama: doğru sırada çıkan takım 3p, çıktı ama sıra yanlış 1p, şampiyon 10p.
+   Kilit anından sonra (sunucu damgası) yazılmış tahmin sayılmaz. */
+function picksScore(picksMap) {
+  let pts = 0;
+  for (const [key, p] of Object.entries(picksMap || {})) {
+    if (key === "champion") {
+      if (p.tMillis && p.tMillis > tournamentLockTime()) continue;
+      const c = championResult();
+      if (c && String(p.team) === c) pts += 10;
+    } else if (key.startsWith("group-")) {
+      const letter = key.slice(6);
+      if (p.tMillis && p.tMillis > groupLockTime(letter)) continue;
+      const r = groupResult(letter);
+      if (!r) continue;
+      if (String(p.first) === r[0]) pts += 3; else if (String(p.first) === r[1]) pts += 1;
+      if (String(p.second) === r[1]) pts += 3; else if (String(p.second) === r[0]) pts += 1;
+    }
+  }
+  return pts;
+}
+
+function savePickLocalAndCloud(key, data) {
+  state.picks[key] = { ...data };
+  store.set("picks", state.picks);
+  if (state.lig && window.lig) {
+    window.lig.savePick(key, data).then(() => { state.leagueAt = 0; }).catch(() => {});
+  }
+}
+
 function renderGroups() {
   if (!state.standings) { view.innerHTML = loadingHTML(); return; }
   let groups = [...state.standings];
@@ -599,19 +661,25 @@ function renderLeague() {
 
   const me = window.lig.myUid();
   const rows = state.league
-    .map((u) => ({ ...u, score: leagueScore(u.preds) }))
-    .sort((a, b) => b.score.pts - a.score.pts || b.score.exact - a.score.exact || b.score.total - a.score.total);
+    .map((u) => {
+      const score = leagueScore(u.preds);
+      const tour = picksScore(u.picks);
+      return { ...u, score, tour, grand: score.pts + tour };
+    })
+    .sort((a, b) => b.grand - a.grand || b.score.exact - a.score.exact || b.score.total - a.score.total);
 
-  let html = `<div class="section-title">🏅 Tahmin Ligi · ${rows.length} oyuncu</div>`;
+  let html = `
+    <button class="picks-cta" id="openPicks">🏆 Turnuva Tahminlerin<small>Grup çıkanları ve şampiyonu seç · gruplar başlamadan kilitlenir</small></button>
+    <div class="section-title">🏅 Tahmin Ligi · ${rows.length} oyuncu</div>`;
   rows.forEach((u, i) => {
     const mine = u.uid === me;
     html += `<div class="scorer-row league-row ${mine ? "me" : ""}" data-liguser="${esc(u.uid)}">
       <div class="scorer-rank ${i < 3 ? "top" : ""}">${i + 1}</div>
       <div class="scorer-info">
         <div class="scorer-name">${esc(u.name)}${mine ? ' <span class="me-tag">sen</span>' : ""}</div>
-        <div class="scorer-team">${u.score.exact} tam isabet · ${u.score.total} tahmin</div>
+        <div class="scorer-team">maç ${u.score.pts} · turnuva ${u.tour} · ${u.score.exact} tam isabet</div>
       </div>
-      <div><div class="scorer-goals">${u.score.pts}</div><div class="scorer-sub">puan</div></div>
+      <div><div class="scorer-goals">${u.grand}</div><div class="scorer-sub">puan</div></div>
     </div>`;
   });
   html += `<div class="attribution">Adını değiştirmek için tekrar katıl: <button class="link-btn" id="ligRename">takma adı değiştir</button></div>`;
@@ -848,6 +916,92 @@ function openTeam(teamId) {
   };
 }
 
+/* ============ Turnuva tahminleri ekranı ============ */
+async function openPicks() {
+  openSheet(loadingHTML());
+  if (!state.standings) { try { await loadStandings(); } catch {} }
+  if (!state.standings) { $("#sheetContent").innerHTML = emptyHTML("⚠️", "Gruplar yüklenemedi."); return; }
+  renderPicksSheet();
+}
+
+function pickChipHTML(team, slot, locked, resultMark) {
+  const badge = slot === 1 ? `<b class="slot-badge s1">1.</b>` : slot === 2 ? `<b class="slot-badge s2">2.</b>` : "";
+  return `<button class="team-chip pick-chip ${slot ? "on" : ""} ${locked ? "locked" : ""} ${resultMark || ""}" ${locked ? "disabled" : ""} data-pick-team="${esc(team.id)}">
+    ${team.logo ? `<img src="${esc(team.logo)}" alt="">` : ""}<span>${esc(team.name)}</span>${badge}
+  </button>`;
+}
+
+function renderPicksSheet() {
+  const now = Date.now();
+  let html = `<div class="set-title">🏆 Turnuva Tahminlerin</div>
+    <div class="pred-note" style="margin:0 0 14px">Doğru sırada çıkan takım 3p · çıktı ama sıra yanlış 1p · şampiyon 10p.<br>Her grubun tahmini, grubun ilk maçıyla kilitlenir.</div>`;
+
+  // şampiyon
+  const champLocked = now >= tournamentLockTime();
+  const champPick = state.picks["champion"];
+  const champResult = championResult();
+  html += `<div class="md-section"><h3>👑 Şampiyon (10 puan)${champLocked ? " · 🔒 kilitli" : ""}</h3><div class="team-grid" data-pick-section="champion">`;
+  for (const t of state.teamsCache || []) {
+    const slot = champPick && String(champPick.team) === t.id ? 1 : 0;
+    let mark = "";
+    if (champResult && slot) mark = champResult === t.id ? "hit" : "miss";
+    html += pickChipHTML(t, slot ? 1 : 0, champLocked, mark).replace('class="slot-badge s1">1.', 'class="slot-badge s1">👑');
+  }
+  html += `</div></div>`;
+
+  // gruplar
+  for (const g of state.standings) {
+    const letter = groupLetterOf(g);
+    const key = "group-" + letter;
+    const entries = (g.standings && g.standings.entries) || [];
+    const locked = now >= groupLockTime(letter);
+    const p = state.picks[key] || {};
+    const r = groupResult(letter);
+    let pts = null;
+    if (r && (p.first || p.second)) {
+      pts = 0;
+      if (String(p.first) === r[0]) pts += 3; else if (String(p.first) === r[1]) pts += 1;
+      if (String(p.second) === r[1]) pts += 3; else if (String(p.second) === r[0]) pts += 1;
+    }
+    html += `<div class="md-section"><h3>${esc(letter)} Grubu${locked ? " · 🔒" : ""}${pts !== null ? ` · <b class="pp ${pts >= 4 ? "pp3" : pts > 0 ? "pp1" : "pp0"}">+${pts}</b>` : ""}</h3>
+      <div class="team-grid pick-grid" data-pick-section="${esc(key)}">`;
+    for (const e of entries) {
+      const id = String(e.team.id);
+      const team = { id, name: trName(e.team), logo: (e.team.logos && e.team.logos[0] && e.team.logos[0].href) || "" };
+      const slot = String(p.first) === id ? 1 : String(p.second) === id ? 2 : 0;
+      let mark = "";
+      if (r && slot) mark = (slot === 1 && id === r[0]) || (slot === 2 && id === r[1]) ? "hit" : r.includes(id) ? "half" : "miss";
+      html += pickChipHTML(team, slot, locked, mark);
+    }
+    html += `</div></div>`;
+  }
+  html += `<div class="pred-note">Seçimler anında kaydedilir${state.lig ? " ve lige gönderilir" : ""}.</div>`;
+
+  const sc = $("#sheetContent");
+  const scrollY = sc.scrollTop;
+  sc.innerHTML = html;
+  sc.scrollTop = scrollY;
+  sc.onclick = (e) => {
+    const chip = e.target.closest("[data-pick-team]");
+    if (!chip || chip.disabled) return;
+    const section = chip.closest("[data-pick-section]").dataset.pickSection;
+    const id = chip.dataset.pickTeam;
+    if (section === "champion") {
+      const cur = state.picks["champion"];
+      savePickLocalAndCloud("champion", cur && String(cur.team) === id ? { team: null } : { team: id });
+    } else {
+      const p = { ...(state.picks[section] || {}) };
+      if (String(p.first) === id) { p.first = p.second || null; p.second = null; }
+      else if (String(p.second) === id) { p.second = null; }
+      else if (!p.first) { p.first = id; }
+      else if (!p.second) { p.second = id; }
+      else { p.second = id; }
+      savePickLocalAndCloud(section, { first: p.first || null, second: p.second || null });
+    }
+    renderPicksSheet();
+  };
+}
+
 /* ============ Tahmin listesi ============ */
 function openPredictions() {
   const t = predTotals();
@@ -1008,6 +1162,7 @@ view.addEventListener("click", (e) => {
   if (e.target.closest("#predChip")) { openPredictions(); return; }
   if (e.target.closest("#ligJoin")) { joinLeague(); return; }
   if (e.target.closest("#ligRename")) { state.lig = null; render(); return; }
+  if (e.target.closest("#openPicks")) { openPicks(); return; }
   const lrow = e.target.closest("[data-liguser]");
   if (lrow) { openLeagueUser(lrow.dataset.liguser); return; }
   const trow = e.target.closest("[data-teampage]");
@@ -1064,15 +1219,37 @@ function openLeagueUser(uid) {
       </div>`;
     }).join("");
   const s = leagueScore(u.preds);
+  const tour = picksScore(u.picks);
+
+  // turnuva tahminleri özeti (kilitlenmemiş seçimler başkalarına gizli)
+  const teamName = (id) => {
+    const t = (state.teamsCache || []).find((x) => x.id === String(id));
+    return t ? t.name : "?";
+  };
+  let pickLines = "";
+  const cp = u.picks && u.picks["champion"];
+  if (cp && cp.team) {
+    const show = mine || now >= tournamentLockTime();
+    pickLines += `<div class="pick-line"><span>👑 Şampiyon</span><b>${show ? esc(teamName(cp.team)) : "🔒"}</b></div>`;
+  }
+  for (const [key, p] of Object.entries(u.picks || {})) {
+    if (!key.startsWith("group-") || (!p.first && !p.second)) continue;
+    const letter = key.slice(6);
+    const show = mine || now >= groupLockTime(letter);
+    const txt = show ? [p.first, p.second].filter(Boolean).map(teamName).map(esc).join(", ") : "🔒";
+    pickLines += `<div class="pick-line"><span>${esc(letter)} Grubu</span><b>${txt}</b></div>`;
+  }
+
   openSheet(`
     <div class="set-title">🏅 ${esc(u.name)}${mine ? ' <span class="me-tag">sen</span>' : ""}</div>
     <div class="pred-summary">
-      <div><b>${s.pts}</b><small>puan</small></div>
+      <div><b>${s.pts + tour}</b><small>toplam puan</small></div>
+      <div><b>${tour}</b><small>turnuva</small></div>
       <div><b>${s.exact}</b><small>tam isabet</small></div>
-      <div><b>${s.total}</b><small>tahmin</small></div>
     </div>
-    ${rows || emptyHTML("🎯", "Henüz tahmini yok.")}
-    ${mine ? "" : `<div class="pred-note">🔒 Başkalarının tahminleri maç başlayana kadar gizlidir.</div>`}`);
+    ${pickLines ? `<div class="md-section"><h3>🏆 Turnuva Tahminleri</h3>${pickLines}</div>` : ""}
+    ${rows || emptyHTML("🎯", "Henüz maç tahmini yok.")}
+    ${mine ? "" : `<div class="pred-note">🔒 Tahminler maç/turnuva başlayana kadar gizlidir.</div>`}`);
   $("#sheetContent").onclick = (e) => {
     const card = e.target.closest("[data-match]");
     if (card) openMatch(card.dataset.match);
@@ -1103,6 +1280,23 @@ async function refreshForTab(force) {
 }
 
 /* ============ Döngü ============ */
+function checkReminders() {
+  if (!state.notif.enabled || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const now = Date.now();
+  let dirty = false;
+  for (const m of state.matches) {
+    if (m.state !== "pre" || state.reminded[m.id]) continue;
+    if (state.notif.scope === "favs" && !involvesFav(m)) continue;
+    const delta = new Date(m.date).getTime() - now;
+    if (delta > 0 && delta <= 20 * 60 * 1000) {
+      showNotif("🕒 Maç birazdan başlıyor", `${m.home.name} - ${m.away.name} · ${fmtTime(m.date)}`, "remind-" + m.id);
+      state.reminded[m.id] = 1;
+      dirty = true;
+    }
+  }
+  if (dirty) store.set("reminded", state.reminded);
+}
+
 async function poll() {
   const anyLive = state.matches.some((m) => m.state === "in");
   const soon = state.matches.some((m) => m.state === "pre" && new Date(m.date) - Date.now() < 15 * 60 * 1000 && new Date(m.date) - Date.now() > -10 * 60 * 1000);
@@ -1113,6 +1307,12 @@ async function poll() {
       await loadMatches(true);
       if (state.tab === "matches" || state.tab === "bracket") render();
     } catch {}
+  }
+  checkReminders();
+  // canlı maç varken puan durumu ve golcüler de arka planda taze kalsın (TTL'ler aşırı isteği engeller)
+  if (anyLive) {
+    loadStandings().then(() => { if (state.tab === "groups") render(); }).catch(() => {});
+    loadScorers().then(() => { if (state.tab === "scorers") render(); }).catch(() => {});
   }
 }
 
