@@ -530,6 +530,16 @@ function championResult() {
 
 /* Puanlama: doğru sırada çıkan takım 3p, çıktı ama sıra yanlış 1p, şampiyon 10p.
    Kilit anından sonra (sunucu damgası) yazılmış tahmin sayılmaz. */
+// eleme turu doğru tahmin puanları (tur ilerledikçe artar)
+const KO_PTS = { r32: 1, r16: 2, qf: 4, sf: 6, third: 2, final: 8 };
+
+function koWinnerId(m) {
+  if (!m || m.state !== "post") return null;
+  if (m.home.winner && !m.home.tbd) return String(m.home.id);
+  if (m.away.winner && !m.away.tbd) return String(m.away.id);
+  return null;
+}
+
 function picksScore(picksMap) {
   let pts = 0;
   for (const [key, p] of Object.entries(picksMap || {})) {
@@ -544,6 +554,12 @@ function picksScore(picksMap) {
       if (!r) continue;
       if (String(p.first) === r[0]) pts += 3; else if (String(p.first) === r[1]) pts += 1;
       if (String(p.second) === r[1]) pts += 3; else if (String(p.second) === r[0]) pts += 1;
+    } else if (key.startsWith("ko-")) {
+      const m = state.matches.find((x) => String(x.id) === key.slice(3));
+      if (!m) continue;
+      if (p.tMillis && p.tMillis > new Date(m.date).getTime()) continue;
+      const w = koWinnerId(m);
+      if (w && String(p.team) === w) pts += KO_PTS[m.round.key] || 1;
     }
   }
   return pts;
@@ -649,13 +665,21 @@ function renderBracket() {
     const cards = list.map((m) => {
       const fav = involvesFav(m);
       const live = m.state === "in";
-      const row = (t) => `<div class="bm-row ${t.winner ? "winner" : ""}">
+      const koPick = state.picks["ko-" + m.id];
+      const pickable = m.state === "pre" && !m.home.tbd && !m.away.tbd;
+      const row = (t) => {
+        const picked = koPick && String(koPick.team) === String(t.id);
+        return `<div class="bm-row ${t.winner ? "winner" : ""} ${picked ? "picked" : ""}">
         ${t.logo && !t.tbd ? `<img src="${esc(t.logo)}" alt="">` : ""}
         <span class="name ${t.tbd ? "tbd" : ""}">${esc(t.name)}</span>
+        ${picked ? '<span class="pick-check">✓</span>' : ""}
         <span class="sc">${m.state === "pre" ? "" : esc(t.score ?? "")}</span>
       </div>`;
+      };
       const foot = m.state === "in"
         ? `<span class="live">● ${esc(m.clock || "CANLI")}</span><span>${esc(m.venue)}</span>`
+        : pickable && !koPick
+        ? `<span class="bm-pickhint">🌳 tahmin için dokun</span><span>${m.state === "pre" ? fmtTime(m.date) : ""}</span>`
         : `<span>${new Date(m.date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} ${m.state === "pre" ? fmtTime(m.date) : "MS"}</span><span>${esc(m.city.split(",")[0] || "")}</span>`;
       return `<div class="bracket-match ${fav ? "fav" : ""} ${live ? "live" : ""}" data-match="${m.id}">
         ${row(m.home)}${row(m.away)}
@@ -835,6 +859,30 @@ async function openMatch(id, silent) {
       html += `<div class="md-section"><h3>🎯 Tahminin</h3><div class="pred-result">${myPred.h} - ${myPred.a}${badge}</div></div>`;
     }
 
+    // eleme turu tahmini: bu turu kim geçer? (takımlar belliyse)
+    if (m && m.round.key !== "group" && !m.home.tbd && !m.away.tbd) {
+      const koKey = "ko-" + id;
+      const koPick = state.picks[koKey];
+      const koPts = KO_PTS[m.round.key] || 1;
+      const w = koWinnerId(m);
+      const koTeam = (t) => {
+        const picked = koPick && String(koPick.team) === String(t.id);
+        const result = w ? (String(t.id) === w ? "hit" : "miss") : "";
+        return `<button class="ko-pick-btn ${picked ? "on" : ""} ${result}" ${pre ? "" : "disabled"} data-ko-team="${esc(String(t.id))}">
+          ${t.logo ? `<img src="${esc(t.logo)}" alt="">` : ""}
+          <span>${esc(t.name)}</span>
+        </button>`;
+      };
+      let foot;
+      if (w && koPick) foot = String(koPick.team) === w ? `<b class="pp pp3">+${koPts} puan</b>` : `<b class="pp pp0">0 puan</b>`;
+      else foot = pre ? `Doğru bilirsen +${koPts} puan · maç başlayınca kilitlenir` : "Tahmin penceresi kapandı";
+      html += `<div class="md-section" data-ko-section="${esc(koKey)}">
+        <h3>🌳 Bu turu kim geçer?</h3>
+        <div class="ko-pick-row">${koTeam(m.home)}${koTeam(m.away)}</div>
+        <div class="pred-note">${foot}</div>
+      </div>`;
+    }
+
     // kazanma ihtimali (bahis oranlarından, vigsiz)
     const wp = winProbs(j);
     if (wp) {
@@ -968,6 +1016,15 @@ async function openMatch(id, silent) {
     sc.innerHTML = html;
     sc.scrollTop = scrollY;
     sc.onclick = (e) => {
+      const koBtn = e.target.closest("[data-ko-team]");
+      if (koBtn && !koBtn.disabled) {
+        const koKey = koBtn.closest("[data-ko-section]").dataset.koSection;
+        const teamId = koBtn.dataset.koTeam;
+        const cur = state.picks[koKey];
+        savePickLocalAndCloud(koKey, cur && String(cur.team) === teamId ? { team: null } : { team: teamId });
+        openMatch(id, true);
+        return;
+      }
       const save = e.target.closest("#predSave");
       if (save) {
         const h = parseInt($("#predH").value, 10), a = parseInt($("#predA").value, 10);

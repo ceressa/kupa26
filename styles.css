@@ -955,6 +955,33 @@ table.standings {
 .pick-line span { color: var(--muted); flex-shrink: 0; }
 .pick-line b { text-align: right; }
 
+/* ---------- Eleme tahmini ---------- */
+.ko-pick-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.ko-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card2);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.ko-pick-btn img { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+.ko-pick-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ko-pick-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--card2)); }
+.ko-pick-btn.hit { border-color: var(--accent2); background: color-mix(in srgb, var(--accent2) 16%, var(--card2)); }
+.ko-pick-btn.miss { opacity: 0.55; }
+.ko-pick-btn:disabled { cursor: default; }
+
+.bm-row.picked { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 5px; }
+.pick-check { color: var(--accent); font-weight: 800; font-size: 12px; }
+.bm-pickhint { color: var(--accent); font-weight: 700; }
+
 /* ---------- Lig ---------- */
 .join-card {
   background: var(--card);
