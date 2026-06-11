@@ -727,13 +727,15 @@ function renderLeague() {
     window.addEventListener("lig-ready", () => { if (state.tab === "league") refreshForTab(); }, { once: true });
     return;
   }
-  if (!state.lig) {
+  if (!state.lig || !state.lig.member) {
+    const savedName = state.lig && state.lig.name ? esc(state.lig.name) : "";
     view.innerHTML = `
       <div class="join-card">
         <div class="join-emoji">🏅</div>
         <h2>Tahmin Ligi</h2>
-        <p>Takma adınla katıl, tahminlerinle arkadaşlarına karşı yarış. Doğru skor 3 puan, doğru sonuç 1 puan. Başkalarının tahminleri maç başlayana kadar gizli kalır.</p>
-        <input id="ligName" type="text" maxlength="20" placeholder="Takma adın (örn. Ufuk)" autocomplete="nickname">
+        <p>Takma adın ve davet kodunla katıl, tahminlerinle arkadaşlarına karşı yarış. Doğru skor 3 puan, doğru sonuç 1 puan. Başkalarının tahminleri maç başlayana kadar gizli kalır.</p>
+        <input id="ligName" type="text" maxlength="20" placeholder="Takma adın (örn. Ufuk)" autocomplete="nickname" value="${savedName}">
+        <input id="ligCode" type="text" maxlength="40" placeholder="Davet kodu" autocomplete="off" autocapitalize="off">
         <button id="ligJoin" class="pred-save">Lige Katıl</button>
         <div class="pred-note" id="ligErr"></div>
       </div>`;
@@ -1399,9 +1401,9 @@ view.addEventListener("click", (e) => {
   if (card) openMatch(card.dataset.match);
 });
 
-async function joinWithName(name) {
-  await window.lig.join(name);
-  state.lig = { name };
+async function joinWithName(name, code) {
+  await window.lig.join(name, code);
+  state.lig = { name, member: true };
   store.set("lig", state.lig);
   // mevcut yerel tahminleri buluta taşı (başlamamış maçlar geçerli sayılır)
   for (const [mid, p] of Object.entries(state.preds)) {
@@ -1415,18 +1417,23 @@ async function joinWithName(name) {
 
 async function joinLeague() {
   const input = $("#ligName");
+  const codeInput = $("#ligCode");
   const err = $("#ligErr");
   const name = (input.value || "").trim();
+  const code = (codeInput.value || "").trim();
   if (name.length < 2) { err.textContent = "En az 2 karakterlik bir ad gir."; return; }
+  if (!code) { err.textContent = "Davet kodunu gir."; return; }
   const btn = $("#ligJoin");
   btn.textContent = "Katılıyor...";
   try {
-    await joinWithName(name);
+    await joinWithName(name, code);
     await loadLeague(true);
     render();
   } catch (ex) {
     btn.textContent = "Lige Katıl";
-    err.textContent = "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
+    err.textContent = ex && ex.message === "bad-code"
+      ? "Davet kodu yanlış. Lig kurucusundan doğru kodu al."
+      : "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
   }
 }
 
@@ -1447,6 +1454,7 @@ function maybeOnboard() {
         <li>🔔 Gol ve maç bildirimleri al</li>
       </ul>
       <input id="obName" type="text" maxlength="20" placeholder="Takma adın (ligde görünecek)" autocomplete="nickname">
+      <input id="obCode" type="text" maxlength="40" placeholder="Davet kodu" autocomplete="off" autocapitalize="off">
       <button id="obJoin" class="pred-save">Başla 🚀</button>
       <div class="pred-note" id="obErr"></div>
       <button class="link-btn ob-skip" id="obSkip">Şimdilik atla, sadece skorları izleyeceğim</button>
@@ -1461,13 +1469,15 @@ function maybeOnboard() {
     }
     if (!e.target.closest("#obJoin")) return;
     const name = ($("#obName").value || "").trim();
+    const code = ($("#obCode").value || "").trim();
     const err = $("#obErr");
     if (name.length < 2) { err.textContent = "En az 2 karakterlik bir ad gir."; return; }
+    if (!code) { err.textContent = "Davet kodunu gir (lig kurucusundan al)."; return; }
     const btn = $("#obJoin");
     btn.textContent = "Katılıyor...";
     try {
       if (!window.lig) await new Promise((r) => window.addEventListener("lig-ready", r, { once: true }));
-      await joinWithName(name);
+      await joinWithName(name, code);
       store.set("onboarded", true);
       ob.remove();
       loadLeague(true).then(() => { if (state.tab === "league") render(); }).catch(() => {});
@@ -1475,7 +1485,9 @@ function maybeOnboard() {
       openPicks();
     } catch (ex) {
       btn.textContent = "Başla 🚀";
-      err.textContent = "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
+      err.textContent = ex && ex.message === "bad-code"
+        ? "Davet kodu yanlış. Lig kurucusundan doğru kodu al."
+        : "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
     }
   });
 }

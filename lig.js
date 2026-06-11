@@ -3,7 +3,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDocs, collection, collectionGroup, serverTimestamp, arrayUnion
+  getFirestore, doc, setDoc, getDoc, getDocs, collection, collectionGroup, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getMessaging, getToken, isSupported } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging.js";
 
@@ -65,11 +65,27 @@ window.lig = {
     await setDoc(doc(db, "users", u.uid), { favs: (favs || []).map(String), notifPrefs: prefs || {} }, { merge: true });
   },
 
-  // takma adla lige katil (ya da adi guncelle)
-  async join(name) {
+  // takma ad + davet koduyla lige katil. Kod kuralda dogrulanir; yanlissa hata firlatir.
+  async join(name, code) {
     const u = await ensureSignedIn();
+    try {
+      await setDoc(doc(db, "members", u.uid), { code: String(code || ""), t: serverTimestamp() });
+    } catch (e) {
+      const err = new Error("bad-code");
+      err.code = (e && e.code) || "permission-denied";
+      throw err;
+    }
     await setDoc(doc(db, "users", u.uid), { name: String(name).slice(0, 20) }, { merge: true });
     return u.uid;
+  },
+
+  // bu cihaz daha once dogru kodla katildi mi?
+  async isMember() {
+    const u = await ensureSignedIn();
+    try {
+      const s = await getDoc(doc(db, "members", u.uid));
+      return s.exists();
+    } catch { return false; }
   },
 
   // tahmini buluta yaz; t sunucu damgasi (kurallar zorunlu kiliyor)
