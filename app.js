@@ -1654,6 +1654,22 @@ view.addEventListener("click", (e) => {
   if (card) { const id = card.dataset.match; navOpen(() => openMatch(id)); }
 });
 
+// hesabın buluttaki tahmin/seçimlerini yerel ekrana indir (cihaz/oturum değişince geri gelsin)
+async function pullMyData() {
+  if (!window.lig || !state.signedIn) return;
+  try {
+    const mine = await window.lig.fetchMine();
+    let changed = false;
+    for (const [mid, p] of Object.entries(mine.preds || {})) {
+      if (!state.preds[mid]) { state.preds[mid] = { h: p.h, a: p.a }; changed = true; }
+    }
+    for (const [key, p] of Object.entries(mine.picks || {})) {
+      if (!state.picks[key]) { state.picks[key] = { ...p }; changed = true; }
+    }
+    if (changed) { store.set("preds", state.preds); store.set("picks", state.picks); render(); }
+  } catch {}
+}
+
 async function loginToLeague(username, pin, code) {
   await window.lig.login(username, pin, code);
   state.signedIn = true;
@@ -1666,6 +1682,8 @@ async function loginToLeague(username, pin, code) {
   for (const [key, p] of Object.entries(state.picks)) {
     try { await window.lig.savePick(key, { ...p }); } catch {}
   }
+  // hesabın buluttaki tahminlerini yerel ekrana geri yükle
+  await pullMyData();
   syncPushProfile();
 }
 
@@ -1954,6 +1972,7 @@ if ("serviceWorker" in navigator) {
 async function checkSession() {
   if (!window.lig) { await new Promise((r) => window.addEventListener("lig-ready", r, { once: true })); }
   try { state.signedIn = await window.lig.signedIn(); } catch { state.signedIn = false; }
+  if (state.signedIn) pullMyData();
   if (state.tab === "league") render();
   // onboarding favori grid'i için takım listesini hazırla
   if (!store.get("onboarded", false) && !state.signedIn && !state.teamsCache) {

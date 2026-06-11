@@ -94,6 +94,19 @@ window.lig = {
     await setDoc(doc(db, "users", u.uid), { favs: (favs || []).map(String), notifPrefs: prefs || {} }, { merge: true });
   },
 
+  // giris yapan kullanicinin kendi bulut tahminlerini indir (cihaz/oturum degisince geri yukleme)
+  async fetchMine() {
+    const u = requireUser();
+    const [predsSnap, picksSnap] = await Promise.all([
+      getDocs(collection(db, "users", u.uid, "preds")),
+      getDocs(collection(db, "users", u.uid, "picks"))
+    ]);
+    const preds = {}, picks = {};
+    predsSnap.forEach((d) => { const v = d.data(); preds[d.id] = { h: v.h, a: v.a }; });
+    picksSnap.forEach((d) => { const v = d.data(); const o = {}; for (const k of ["first", "second", "team"]) if (v[k] != null) o[k] = v[k]; picks[d.id] = o; });
+    return { preds, picks };
+  },
+
   // tahmini buluta yaz; t sunucu damgasi (kurallar zorunlu kiliyor)
   async savePred(matchId, h, a) {
     const u = requireUser();
