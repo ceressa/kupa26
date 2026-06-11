@@ -53,8 +53,8 @@ const state = {
   reminded: store.get("reminded", {}),
   league: null,
   leagueAt: 0,
-  notif: store.get("notif", { enabled: false, scope: "favs" }),
-  theme: store.get("theme", "auto"),
+  notif: Object.assign({ enabled: false, scope: "favs", sound: "horn" }, store.get("notif", {})),
+  theme: store.get("theme", "dark"),
   snapshot: store.get("snapshot", {}),
   teamsCache: store.get("teams", null)
 };
@@ -105,6 +105,43 @@ function haptic(pattern) {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
 }
 
+// Uygulama acikken calan gol sesi (Web Audio ile sentez, dosya gerektirmez).
+let _audioCtx = null;
+function audioCtx() {
+  if (!_audioCtx) { try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } }
+  if (_audioCtx.state === "suspended") _audioCtx.resume().catch(() => {});
+  return _audioCtx;
+}
+function tone(ctx, freq, start, dur, type, gain) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type || "sawtooth";
+  o.frequency.setValueAtTime(freq, ctx.currentTime + start);
+  g.gain.setValueAtTime(0, ctx.currentTime + start);
+  g.gain.linearRampToValueAtTime(gain || 0.18, ctx.currentTime + start + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02);
+}
+function playSound(kind) {
+  const k = kind || state.notif.sound;
+  if (!k || k === "off") return;
+  const ctx = audioCtx();
+  if (!ctx) return;
+  if (k === "horn") {
+    // stadyum kornasi: iki katmanli kalin ses
+    tone(ctx, 233, 0, 0.5, "sawtooth", 0.16);
+    tone(ctx, 311, 0, 0.5, "square", 0.10);
+    tone(ctx, 233, 0.55, 0.7, "sawtooth", 0.18);
+    tone(ctx, 311, 0.55, 0.7, "square", 0.11);
+  } else if (k === "whistle") {
+    tone(ctx, 2100, 0, 0.18, "sine", 0.14);
+    tone(ctx, 2400, 0.2, 0.22, "sine", 0.14);
+  } else if (k === "beep") {
+    tone(ctx, 880, 0, 0.12, "square", 0.14);
+    tone(ctx, 1320, 0.14, 0.16, "square", 0.14);
+  }
+}
+
 // güvenli takım rengi (okunur kontrast için fazla koyu/açıkları kırp)
 function teamColor(hex) {
   if (!hex || !/^[0-9a-f]{6}$/i.test(hex)) return null;
@@ -141,6 +178,12 @@ function normMatch(ev) {
 }
 
 function involvesFav(m) { return state.favs.includes(String(m.home.id)) || state.favs.includes(String(m.away.id)); }
+// bu maçta bildirim gelecek mi? (ayarlara göre)
+function willNotify(m) {
+  if (!state.notif.enabled) return false;
+  if (state.notif.scope === "all") return true;
+  return involvesFav(m) || !!state.preds[m.id];
+}
 
 /* ============ Veri yükleme ============ */
 async function loadMatches(force) {
@@ -243,7 +286,7 @@ function diffAndNotify(matches) {
     // gol anında titreşim (bildirim izni olmasa da, uygulama açıkken)
     if (!firstRun && prevAny && m.state !== "pre" &&
         (Number(m.home.score) > Number(prevAny.h ?? 0) || Number(m.away.score) > Number(prevAny.a ?? 0))) {
-      if (state.notif.scope !== "favs" || involvesFav(m)) haptic([60, 40, 90]);
+      if (state.notif.scope !== "favs" || involvesFav(m)) { haptic([60, 40, 90]); playSound(); }
     }
     if (!canNotify) continue;
     if (state.notif.scope === "favs" && !involvesFav(m)) continue;
@@ -306,7 +349,9 @@ function matchCardHTML(m) {
     predHTML = `<div class="mc-meta">🎯 Tahminin: ${p.h} - ${p.a}${badge}</div>`;
   }
   const sig = m.state === "pre" ? "" : `${m.home.score}-${m.away.score}`;
+  const bell = m.state !== "post" && willNotify(m) ? `<span class="mc-bell" title="Bu maçta bildirim gelecek">🔔</span>` : "";
   return `<div class="match-card ${fav ? "fav" : ""} ${live ? "live" : ""}" data-match="${m.id}" data-scoresig="${esc(sig)}">
+    ${bell}
     ${teamRowHTML(m.home, "home")}
     <div class="mc-mid">${mid}</div>
     ${teamRowHTML(m.away, "away")}
@@ -699,13 +744,49 @@ function renderBracket() {
   view.innerHTML = `<div class="bracket-scroll"><div class="bracket">${cols}</div></div>`;
 }
 
+function tournamentStats() {
+  const played = state.matches.filter((m) => m.state === "post" && m.home.score != null && m.away.score != null);
+  let goals = 0, biggest = null, highest = null;
+  for (const m of played) {
+    const h = Number(m.home.score), a = Number(m.away.score);
+    goals += h + a;
+    const diff = Math.abs(h - a), tot = h + a;
+    if (!biggest || diff > biggest.diff) biggest = { m, diff };
+    if (!highest || tot > highest.tot) highest = { m, tot };
+  }
+  return { played: played.length, goals, avg: played.length ? (goals / played.length) : 0, biggest, highest };
+}
+
 function renderScorers() {
   if (state.scorers === null) { view.innerHTML = loadingHTML(); return; }
+
+  const ts = tournamentStats();
+  let html = "";
+
+  // turnuva istatistikleri (maç oynandıkça dolar)
+  if (ts.played) {
+    const scoreOf = (m) => `${esc(m.home.name)} ${m.home.score}-${m.away.score} ${esc(m.away.name)}`;
+    html += `<div class="section-title">Turnuva İstatistikleri</div>
+      <div class="ts-grid">
+        <div class="ts-box"><b>${ts.goals}</b><small>toplam gol</small></div>
+        <div class="ts-box"><b>${ts.avg.toFixed(1)}</b><small>maç başına gol</small></div>
+        <div class="ts-box"><b>${ts.played}</b><small>oynanan maç</small></div>
+      </div>`;
+    if (ts.biggest || ts.highest) {
+      html += `<div class="ts-list">`;
+      if (ts.biggest) html += `<div class="ts-row"><span>🏟️ En farklı galibiyet</span><b>${scoreOf(ts.biggest.m)}</b></div>`;
+      if (ts.highest) html += `<div class="ts-row"><span>🔥 En gollü maç</span><b>${scoreOf(ts.highest.m)} (${ts.highest.tot})</b></div>`;
+      html += `</div>`;
+    }
+  }
+
+  // gol krallığı
   if (!state.scorers.length) {
-    view.innerHTML = emptyHTML("👟", "Henüz gol atılmadı. İlk goller gelince burada gol krallığı sıralaması görünecek.");
+    html += emptyHTML("👟", "Henüz gol atılmadı. İlk goller gelince gol krallığı burada görünecek.");
+    view.innerHTML = html;
     return;
   }
-  let html = `<div class="section-title">Gol Krallığı</div>`;
+  html += `<div class="section-title">Gol Krallığı</div>`;
   state.scorers.forEach((s, i) => {
     html += `<div class="scorer-row">
       <div class="scorer-rank ${i < 3 ? "top" : ""}">${i + 1}</div>
@@ -716,6 +797,22 @@ function renderScorers() {
       <div><div class="scorer-goals">${s.goals}</div><div class="scorer-sub">gol</div></div>
     </div>`;
   });
+
+  // asist krallığı
+  const assisters = state.scorers.filter((s) => s.assists > 0).sort((a, b) => b.assists - a.assists).slice(0, 10);
+  if (assisters.length) {
+    html += `<div class="section-title">Asist Krallığı</div>`;
+    assisters.forEach((s, i) => {
+      html += `<div class="scorer-row">
+        <div class="scorer-rank ${i < 3 ? "top" : ""}">${i + 1}</div>
+        <div class="scorer-info">
+          <div class="scorer-name">${esc(s.name)}</div>
+          <div class="scorer-team">${s.logo ? `<img src="${esc(s.logo)}" alt="">` : ""}${esc(s.team)}</div>
+        </div>
+        <div><div class="scorer-goals">${s.assists}</div><div class="scorer-sub">asist</div></div>
+      </div>`;
+    });
+  }
   view.innerHTML = html;
 }
 
@@ -954,7 +1051,10 @@ async function openMatch(id, silent) {
       const aStats = teams.find((t) => String(t.team.id) === String(away.team.id)) || teams[1];
       const labels = {
         possessionPct: "Topa Sahip Olma %", totalShots: "Toplam Şut", shotsOnTarget: "İsabetli Şut",
-        wonCorners: "Korner", foulsCommitted: "Faul", totalPasses: "Pas", saves: "Kurtarış", offsides: "Ofsayt"
+        shotsOffTarget: "İsabetsiz Şut", blockedShots: "Bloke Şut", wonCorners: "Korner",
+        foulsCommitted: "Faul", offsides: "Ofsayt", totalPasses: "Pas", accuratePasses: "İsabetli Pas",
+        passPct: "Pas İsabeti %", crosses: "Orta", totalTackles: "Müdahale", interceptions: "Top Kapma",
+        saves: "Kurtarış", yellowCards: "Sarı Kart", redCards: "Kırmızı Kart"
       };
       let stats = "";
       for (const key of Object.keys(labels)) {
@@ -1270,13 +1370,25 @@ function renderSettings() {
         <div>Maç bildirimleri<small>Gol, maç başlangıcı, sonucu ve hatırlatma</small></div>
         <div class="switch ${state.notif.enabled && perm === "granted" ? "on" : ""}" id="swNotif"></div>
       </div>
+      <div class="set-label">Hangi maçlar?</div>
       <div class="seg" id="segScope">
         <button data-scope="favs" class="${state.notif.scope === "favs" ? "on" : ""}">Favori + tahminlerim</button>
         <button data-scope="all" class="${state.notif.scope === "all" ? "on" : ""}">Tüm maçlar</button>
       </div>
+      <div class="notif-info">${state.notif.scope === "all"
+        ? "📣 <b>Tüm maçların</b> golleri, başlama, bitiş ve başlamadan 20 dk önce hatırlatma."
+        : "🎯 Sadece <b>favori takımların</b> ve <b>skor tahmini girdiğin maçların</b>: gol, başlama, bitiş ve hatırlatma. (Maç kartlarında 🔔 ile işaretli.)"}</div>
+      <div class="set-label">Gol sesi <span class="muted-note">(uygulama açıkken)</span></div>
+      <div class="seg" id="segSound">
+        <button data-sound="horn" class="${state.notif.sound === "horn" ? "on" : ""}">📯 Korna</button>
+        <button data-sound="whistle" class="${state.notif.sound === "whistle" ? "on" : ""}">🎵 Düdük</button>
+        <button data-sound="beep" class="${state.notif.sound === "beep" ? "on" : ""}">🔔 Bip</button>
+        <button data-sound="off" class="${state.notif.sound === "off" ? "on" : ""}">🔇 Yok</button>
+      </div>
       <div class="notif-warn" id="pushStatus">${window.lig && window.lig.pushAvailable && window.lig.pushAvailable()
-        ? "🔔 Açıkken uygulama kapalıyken bile bildirim gelir (arka plan)."
-        : "ℹ️ Uygulama açıkken bildirim/titreşim gelir. Arka plan bildirimi için kurulum tamamlanınca aktifleşir."}</div>
+        ? "🔔 Bildirim açıkken uygulama kapalıyken bile gol/maç bildirimi gelir (arka plan)."
+        : "ℹ️ Uygulama açıkken bildirim/titreşim/ses gelir. Arka plan bildirimi kurulumu tamamlanınca aktifleşir."}</div>
+      <div class="notif-warn">🔉 Arka plan (uygulama kapalı) bildirim sesi telefonunun/sisteminin bildirim sesidir; uygulama içinden değiştirilemez. Yukarıdaki ses uygulama açıkken çalar.</div>
       ${perm === "denied" && notifSupported ? `<div class="notif-warn">⚠️ Bildirim izni engellenmiş. Tarayıcı/site ayarlarından izin vermen gerekiyor.</div>` : ""}
       <div class="notif-warn">📱 iPhone'da: Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile kur, uygulamayı oradan aç (iOS 16.4+).</div>
     </div>
@@ -1335,7 +1447,19 @@ function renderSettings() {
       state.notif.scope = scopeBtn.dataset.scope;
       store.set("notif", state.notif);
       document.querySelectorAll("#segScope button").forEach((b) => b.classList.toggle("on", b === scopeBtn));
+      const info = $(".notif-info");
+      if (info) info.innerHTML = state.notif.scope === "all"
+        ? "📣 <b>Tüm maçların</b> golleri, başlama, bitiş ve başlamadan 20 dk önce hatırlatma."
+        : "🎯 Sadece <b>favori takımların</b> ve <b>skor tahmini girdiğin maçların</b>: gol, başlama, bitiş ve hatırlatma. (Maç kartlarında 🔔 ile işaretli.)";
       syncPushProfile();
+      return;
+    }
+    const soundBtn = e.target.closest("#segSound button");
+    if (soundBtn) {
+      state.notif.sound = soundBtn.dataset.sound;
+      store.set("notif", state.notif);
+      document.querySelectorAll("#segSound button").forEach((b) => b.classList.toggle("on", b === soundBtn));
+      playSound(state.notif.sound);
       return;
     }
     const themeBtn = e.target.closest("#segTheme button");
@@ -1453,19 +1577,34 @@ async function joinLeague() {
 /* ============ İlk açılış karşılaması ============ */
 function maybeOnboard() {
   if (store.get("onboarded", false) || state.signedIn) return;
+  const teams = state.teamsCache || [];
+  // favori grid: TR (465) en üstte, sonra alfabetik
+  const ordered = [...teams].sort((a, b) => (a.id === "465" ? -1 : b.id === "465" ? 1 : a.name.localeCompare(b.name, "tr")));
+  const favGrid = ordered.length
+    ? ordered.map((t) => `<button type="button" class="team-chip ob-fav ${state.favs.includes(t.id) ? "on" : ""}" data-team="${t.id}">
+        ${t.logo ? `<img src="${esc(t.logo)}" alt="">` : ""}<span>${esc(t.name)}</span>
+      </button>`).join("")
+    : `<div class="ob-fav-note">Takımlar yükleniyor... sonra Ayarlar'dan da seçebilirsin.</div>`;
+
   const ob = document.createElement("div");
   ob.id = "onboard";
   ob.innerHTML = `
     <div class="ob-card">
-      <div class="ob-ball">⚽</div>
+      <svg class="ob-logo" viewBox="0 0 32 32" width="64" height="64" aria-hidden="true">
+        <defs><linearGradient id="obg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f5cd5a"/><stop offset="1" stop-color="#c69626"/></linearGradient></defs>
+        <circle cx="16" cy="15" r="12" fill="none" stroke="url(#obg)" stroke-width="3"/>
+        <circle cx="16" cy="15" r="7" fill="#f5f8fc"/>
+        <polygon points="16,11 19.3,13.4 18,17.2 14,17.2 12.7,13.4" fill="#102036"/>
+      </svg>
       <h1>Kupa<b>26</b>'ya hoş geldin!</h1>
-      <p class="ob-sub">2026 Dünya Kupası başlıyor. Canlı skorlar, fikstür, puan durumları ve arkadaşlarınla tahmin ligi seni bekliyor.</p>
-      <ul class="ob-feats">
-        <li>🎯 Maçlara skor tahmini gir, puan topla</li>
-        <li>🏆 Şampiyonu ve gruplardan çıkacakları seç</li>
-        <li>🏅 Liderlik tablosunda arkadaşlarınla yarış</li>
-        <li>🔔 Gol ve maç bildirimleri al</li>
-      </ul>
+      <p class="ob-sub">2026 Dünya Kupası. Canlı skorlar, eleme ağacı, gol krallığı ve arkadaşlarınla tahmin ligi.</p>
+
+      <div class="ob-step">1. Favori takımların</div>
+      <p class="ob-hint">Maçları öne çıkar, bildirim al. Türkiye senin için seçili, istediğini ekle.</p>
+      <div class="team-grid ob-fav-grid">${favGrid}</div>
+
+      <div class="ob-step">2. Lige katıl</div>
+      <p class="ob-hint">Aynı ad + PIN'le her cihazdan aynı hesaba dönersin. E-posta yok.</p>
       <input id="obName" type="text" maxlength="20" placeholder="Kullanıcı adın (ligde görünecek)" autocomplete="username">
       <input id="obPin" type="password" maxlength="32" placeholder="PIN belirle (en az 4 hane)" autocomplete="new-password" inputmode="numeric">
       <input id="obCode" type="text" maxlength="40" placeholder="Davet kodu" autocomplete="off" autocapitalize="off">
@@ -1477,6 +1616,15 @@ function maybeOnboard() {
   document.body.appendChild(ob);
 
   ob.addEventListener("click", async (e) => {
+    const favChip = e.target.closest(".ob-fav");
+    if (favChip) {
+      const id = favChip.dataset.team;
+      if (state.favs.includes(id)) state.favs = state.favs.filter((x) => x !== id);
+      else state.favs.push(id);
+      store.set("favs", state.favs);
+      favChip.classList.toggle("on");
+      return;
+    }
     if (e.target.closest("#obSkip")) {
       store.set("onboarded", true);
       ob.remove();
@@ -1684,6 +1832,10 @@ async function checkSession() {
   if (!window.lig) { await new Promise((r) => window.addEventListener("lig-ready", r, { once: true })); }
   try { state.signedIn = await window.lig.signedIn(); } catch { state.signedIn = false; }
   if (state.tab === "league") render();
+  // onboarding favori grid'i için takım listesini hazırla
+  if (!store.get("onboarded", false) && !state.signedIn && !state.teamsCache) {
+    try { await loadStandings(); } catch {}
+  }
   maybeOnboard();
 }
 

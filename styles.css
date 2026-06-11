@@ -68,7 +68,7 @@ body {
   letter-spacing: 0.3px;
 }
 .brand b { color: var(--accent); font-weight: 800; }
-.brand-ball { color: var(--accent); }
+.brand-mark { flex-shrink: 0; }
 
 .header-right { display: flex; align-items: center; gap: 6px; }
 
@@ -169,6 +169,7 @@ body {
 .day-header small { color: var(--muted); font-weight: 500; margin-left: 6px; }
 
 .match-card {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 74px 1fr;
   align-items: center;
@@ -181,6 +182,7 @@ body {
   cursor: pointer;
   transition: transform 0.08s ease;
 }
+.mc-bell { position: absolute; top: 6px; right: 8px; font-size: 10px; opacity: 0.8; }
 .match-card:active { transform: scale(0.985); }
 .match-card.fav { border-color: color-mix(in srgb, var(--fav) 55%, var(--border)); box-shadow: inset 3px 0 0 var(--fav); }
 .match-card.live { border-color: color-mix(in srgb, var(--live) 45%, var(--border)); }
@@ -407,6 +409,23 @@ table.standings {
 .scorer-goals { font-size: 21px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
 .scorer-sub { font-size: 10px; color: var(--muted); text-align: center; }
 
+/* ---------- Turnuva istatistikleri ---------- */
+.ts-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.ts-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 8px;
+  text-align: center;
+}
+.ts-box b { display: block; font-size: 24px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ts-box small { color: var(--muted); font-size: 11px; }
+.ts-list { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px 14px; margin-bottom: 6px; }
+.ts-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; font-size: 13px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.ts-row:last-child { border-bottom: none; }
+.ts-row span { color: var(--muted); flex-shrink: 0; }
+.ts-row b { text-align: right; }
+
 /* ---------- Tab bar ---------- */
 .tabbar {
   position: fixed;
@@ -630,6 +649,18 @@ table.standings {
   line-height: 1.5;
   background: var(--card);
   border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+.set-label { font-size: 12px; font-weight: 700; color: var(--muted); margin: 12px 2px 6px; }
+.muted-note { font-weight: 500; opacity: 0.8; }
+.notif-info {
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
   border-radius: 10px;
   padding: 10px 12px;
   margin-top: 8px;
@@ -871,24 +902,31 @@ table.standings {
 }
 @keyframes obIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 .ob-ball { font-size: 52px; margin-bottom: 8px; }
+.ob-logo { display: block; margin: 0 auto 4px; }
 .ob-card h1 { font-size: 26px; font-weight: 700; letter-spacing: 0.3px; }
 .ob-card h1 b { color: var(--accent); font-weight: 800; }
-.ob-sub { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 10px 0 18px; }
-.ob-feats {
-  list-style: none;
+.ob-sub { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin: 8px 0 16px; }
+.ob-step {
   text-align: left;
-  margin: 0 auto 20px;
-  max-width: 320px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 16px 2px 4px;
 }
-.ob-feats li {
-  font-size: 13.5px;
-  font-weight: 600;
-  padding: 8px 12px;
+.ob-hint { text-align: left; font-size: 12px; color: var(--muted); margin: 0 2px 8px; line-height: 1.45; }
+.ob-fav-grid {
+  max-height: 168px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 6px;
+  border-radius: 12px;
+  padding: 8px;
+  margin-bottom: 4px;
 }
+.ob-fav-note { color: var(--muted); font-size: 12.5px; padding: 16px; }
 .ob-card input {
   display: block;
   width: 100%;
