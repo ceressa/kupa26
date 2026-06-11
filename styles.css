@@ -410,6 +410,26 @@ table.standings {
 .scorer-goals { font-size: 21px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
 .scorer-sub { font-size: 10px; color: var(--muted); text-align: center; }
 
+/* ---------- Kadro / sakat ---------- */
+.squad { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 420px) { .squad { grid-template-columns: 1fr; } }
+.sq-group {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.sq-group h4 { font-size: 12px; color: var(--accent); font-weight: 800; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+.sq-group h4 small { color: var(--muted); font-weight: 600; }
+.sq-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+.sq-no { width: 22px; text-align: center; color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.sq-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sq-age { color: var(--muted); font-size: 11px; }
+.sq-inj { font-size: 9.5px; font-weight: 800; color: #fff; background: var(--live); border-radius: 5px; padding: 1px 5px; }
+.inj-row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 13.5px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.inj-row:last-child { border-bottom: none; }
+.inj-row b { color: var(--accent); }
+
 /* ---------- Turnuva istatistikleri ---------- */
 .ts-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .ts-box {
@@ -458,64 +478,64 @@ table.standings {
 .tab svg { width: 22px; height: 22px; }
 .tab.active { color: var(--accent); }
 
-/* ---------- Bottom sheet ---------- */
+/* ---------- Popup modal ---------- */
 .sheet-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.55);
+  background: rgba(6, 12, 24, 0.55);
+  backdrop-filter: blur(7px) saturate(120%);
+  -webkit-backdrop-filter: blur(7px) saturate(120%);
   z-index: 100;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
-  will-change: opacity;
+  padding: max(20px, env(safe-area-inset-top)) 12px calc(20px + env(safe-area-inset-bottom));
+  animation: overlayIn 0.2s ease;
 }
+.sheet-overlay.hidden { display: none; }
+.sheet-overlay.closing { animation: overlayOut 0.2s ease forwards; }
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes overlayOut { from { opacity: 1; } to { opacity: 0; } }
 .sheet {
+  position: relative;
   background: var(--bg2);
-  border-radius: 20px 20px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 20px;
   width: 100%;
-  max-width: 680px;
-  max-height: 88dvh;
+  max-width: 560px;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
-  animation: slideUp 0.30s cubic-bezier(0.22, 1, 0.36, 1);
-  touch-action: pan-y;
-  will-change: transform;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  animation: popIn 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+  overflow: hidden;
 }
-.sheet.dragging { animation: none; transition: none; }
-/* yumuşak geri yaylanma (hafif yay hissi) */
-.sheet.settling { animation: none; transition: transform 0.34s cubic-bezier(0.22, 1.2, 0.4, 1); }
-/* doğal aşağı kayarak kapanış */
-.sheet.closing { animation: none; transition: transform 0.32s cubic-bezier(0.4, 0.0, 0.2, 1); }
-@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sheet-overlay.closing .sheet { animation: popOut 0.18s ease forwards; }
+@keyframes popIn { from { transform: scale(0.94) translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes popOut { from { transform: none; opacity: 1; } to { transform: scale(0.96) translateY(8px); opacity: 0; } }
 .sheet-handle {
   position: relative;
   flex-shrink: 0;
-  height: 34px;
-  cursor: grab;
-  touch-action: none;
+  height: 44px;
 }
-.sheet-handle:active { cursor: grabbing; }
-.sheet-grip {
-  width: 40px; height: 5px;
-  background: var(--border);
-  border-radius: 3px;
-  margin: 12px auto 0;
-}
-.sheet-close {
+.sheet-close, .sheet-back {
   position: absolute;
-  top: 6px; right: 10px;
-  width: 30px; height: 30px;
+  top: 8px;
+  width: 32px; height: 32px;
   border: none;
   border-radius: 50%;
   background: var(--card2);
   color: var(--muted);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
+  z-index: 2;
 }
-.sheet-close:active { background: var(--border); color: var(--text); }
+.sheet-close { right: 10px; }
+.sheet-back { left: 10px; }
+.sheet-close:active, .sheet-back:active { background: var(--border); color: var(--text); }
 .sheet-content {
   overflow-y: auto;
-  padding: 8px 16px calc(24px + env(safe-area-inset-bottom));
+  padding: 0 16px calc(20px + env(safe-area-inset-bottom));
   -webkit-overflow-scrolling: touch;
 }
 
@@ -526,6 +546,8 @@ table.standings {
 .md-team { text-align: center; min-width: 0; }
 .md-team img { width: 52px; height: 52px; object-fit: contain; }
 .md-team .name { font-size: 13.5px; font-weight: 700; margin-top: 6px; }
+.md-team.tappable { cursor: pointer; border-radius: 10px; padding: 4px; transition: background 0.1s; }
+.md-team.tappable:active { background: var(--card2); }
 .md-score { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .md-status { font-size: 13px; color: var(--muted); margin-top: 8px; font-weight: 600; }
 .md-status.live { color: var(--live); }

@@ -944,7 +944,7 @@ async function openMatch(id, silent) {
     const st = comp.status || {};
     const live = st.type && st.type.state === "in";
     const pre = st.type && st.type.state === "pre";
-    const teamHTML = (t) => `<div class="md-team">${t.team.logos && t.team.logos[0] ? `<img src="${esc(t.team.logos[0].href)}" alt="">` : ""}<div class="name">${esc(trName(t.team))}</div></div>`;
+    const teamHTML = (t) => `<div class="md-team${isTBD(t.team) ? "" : " tappable"}"${isTBD(t.team) ? "" : ` data-teampage="${esc(String(t.team.id))}"`}>${t.team.logos && t.team.logos[0] ? `<img src="${esc(t.team.logos[0].href)}" alt="">` : ""}<div class="name">${esc(trName(t.team))}</div></div>`;
     const mid = pre
       ? `<div class="md-score" style="font-size:22px">${fmtTime(comp.date)}</div>`
       : `<div class="md-score">${esc(home.score ?? "")} - ${esc(away.score ?? "")}</div>`;
@@ -1139,6 +1139,8 @@ async function openMatch(id, silent) {
     sc.innerHTML = html;
     sc.scrollTop = scrollY;
     sc.onclick = (e) => {
+      const tp = e.target.closest("[data-teampage]");
+      if (tp) { const tid = tp.dataset.teampage; navPush(() => openTeam(tid)); return; }
       const koBtn = e.target.closest("[data-ko-team]");
       if (koBtn && !koBtn.disabled) {
         const koKey = koBtn.closest("[data-ko-section]").dataset.koSection;
@@ -1174,54 +1176,115 @@ async function openMatch(id, silent) {
 }
 
 /* ============ Takım sayfası ============ */
-function openTeam(teamId) {
+const teamCache = {};
+async function loadTeamData(teamId) {
+  if (teamCache[teamId]) return teamCache[teamId];
+  const out = { roster: null, detail: null };
+  try { out.roster = await fetchJSON(`${API}/teams/${teamId}/roster`); } catch {}
+  try { out.detail = await fetchJSON(`${API}/teams/${teamId}`); } catch {}
+  teamCache[teamId] = out;
+  return out;
+}
+
+const POS_GROUPS = [
+  { key: "G", title: "Kaleciler" },
+  { key: "D", title: "Defans" },
+  { key: "M", title: "Orta Saha" },
+  { key: "F", title: "Forvet" }
+];
+function trStatus(s) {
+  const m = { Injured: "Sakat", Suspended: "Cezalı", Out: "Yok", Doubtful: "Şüpheli", Questionable: "Şüpheli", Day: "Şüpheli" };
+  return m[s] || s;
+}
+
+async function openTeam(teamId) {
   teamId = String(teamId);
+  openSheet(loadingHTML());
+
   const tinfo = (state.teamsCache || []).find((t) => t.id === teamId);
   const matches = state.matches.filter((m) => String(m.home.id) === teamId || String(m.away.id) === teamId);
+  if (state.scorers === null) { try { await loadScorers(); } catch {} }
+  const data = await loadTeamData(teamId);
+  if (sheetStack[sheetStack.length - 1] && $("#sheetOverlay").classList.contains("hidden")) return;
 
-  // takımın grubu
-  let groupHTML = "", groupName = "";
+  // grup tablosu + takımın grup satırı
+  let groupHTML = "", groupName = "", myEntry = null;
   for (const g of state.standings || []) {
     const entries = (g.standings && g.standings.entries) || [];
-    if (!entries.some((e) => String(e.team.id) === teamId)) continue;
-    groupName = (g.name || "").replace(/^Group\s+/i, "") + " Grubu";
+    const idx = entries.findIndex((e) => String(e.team.id) === teamId);
+    if (idx < 0) continue;
+    myEntry = entries[idx];
+    groupName = (g.name || "").replace(/^Group\s+/i, "") + " Grubu · " + (idx + 1) + ".";
     let rows = "";
     entries.forEach((e, i) => {
       const me = String(e.team.id) === teamId;
       const logo = (e.team.logos && e.team.logos[0] && e.team.logos[0].href) || "";
-      rows += `<tr class="${me ? "fav-row" : ""}">
+      rows += `<tr class="${me ? "fav-row" : ""}" data-teampage="${e.team.id}">
         <td class="team-cell"><span class="qual-dot ${i < 2 ? "qual-1" : i === 2 ? "qual-3" : ""}"></span>${logo ? `<img src="${esc(logo)}" alt="">` : ""}${esc(trName(e.team))}</td>
-        <td>${statVal(e, "gamesPlayed", "GP")}</td>
-        <td>${statVal(e, "wins", "W")}</td>
-        <td>${statVal(e, "ties", "D")}</td>
-        <td>${statVal(e, "losses", "L")}</td>
-        <td>${statVal(e, "pointDifferential", "GD")}</td>
-        <td class="pts">${statVal(e, "points", "P", "PTS")}</td>
+        <td>${statVal(e, "gamesPlayed", "GP")}</td><td>${statVal(e, "wins", "W")}</td><td>${statVal(e, "ties", "D")}</td><td>${statVal(e, "losses", "L")}</td><td>${statVal(e, "pointDifferential", "GD")}</td><td class="pts">${statVal(e, "points", "P", "PTS")}</td>
       </tr>`;
     });
-    groupHTML = `<div class="md-section" style="padding:0;overflow:hidden">
-      <table class="standings">
-        <thead><tr><th>Takım</th><th>O</th><th>G</th><th>B</th><th>M</th><th>AV</th><th>P</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
+    groupHTML = `<div class="section-title">Puan Durumu</div><div class="md-section" style="padding:0;overflow:hidden">
+      <table class="standings"><thead><tr><th>Takım</th><th>O</th><th>G</th><th>B</th><th>M</th><th>AV</th><th>P</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     break;
   }
 
-  const name = tinfo ? tinfo.name : (matches[0] ? (String(matches[0].home.id) === teamId ? matches[0].home.name : matches[0].away.name) : "Takım");
-  const logo = tinfo ? tinfo.logo : "";
+  const detailTeam = data.detail && data.detail.team;
+  const name = (detailTeam && detailTeam.displayName && (TR_NAMES[detailTeam.displayName] || detailTeam.displayName)) || (tinfo ? tinfo.name : "Takım");
+  const logo = (detailTeam && detailTeam.logos && detailTeam.logos[0] && detailTeam.logos[0].href) || (tinfo ? tinfo.logo : "");
   const isFav = state.favs.includes(teamId);
+
+  // kadro
+  const athletes = (data.roster && data.roster.athletes) || [];
+  let squadHTML = "";
+  if (athletes.length) {
+    for (const grp of POS_GROUPS) {
+      const list = athletes.filter((a) => (a.position && a.position.abbreviation) === grp.key);
+      if (!list.length) continue;
+      const rows = list.map((a) => {
+        const inj = (a.injuries && a.injuries[0]) || null;
+        const badge = inj ? `<span class="sq-inj">${esc(trStatus(inj.status || inj.type || "Sakat"))}</span>` : (a.status && a.status.name && a.status.name !== "Active" ? `<span class="sq-inj">${esc(trStatus(a.status.name))}</span>` : "");
+        return `<div class="sq-row"><span class="sq-no">${esc(a.jersey || "-")}</span><span class="sq-name">${esc(a.displayName)}</span>${a.age ? `<span class="sq-age">${a.age}y</span>` : ""}${badge}</div>`;
+      }).join("");
+      squadHTML += `<div class="sq-group"><h4>${grp.title} <small>${list.length}</small></h4>${rows}</div>`;
+    }
+  }
+
+  // sakat/cezalı listesi
+  const unavail = athletes.filter((a) => (a.injuries && a.injuries.length) || (a.status && a.status.name && a.status.name !== "Active"));
+  let injHTML = "";
+  if (unavail.length) {
+    injHTML = `<div class="section-title">Sakat / Cezalı</div><div class="md-section">` +
+      unavail.map((a) => {
+        const inj = (a.injuries && a.injuries[0]) || {};
+        return `<div class="inj-row"><span>${esc(a.displayName)}</span><b>${esc(trStatus(inj.status || (a.status && a.status.name) || "Yok"))}</b></div>`;
+      }).join("") + `</div>`;
+  }
+
+  // en golcüsü (golcüler listesinden, takım adına göre)
+  const teamScorers = (state.scorers || []).filter((s) => s.team === name).slice(0, 5);
+  let scorerHTML = "";
+  if (teamScorers.length) {
+    scorerHTML = `<div class="section-title">En Golcüleri</div><div class="md-section">` +
+      teamScorers.map((s) => `<div class="inj-row"><span>${esc(s.name)}</span><b>${s.goals} gol${s.assists ? ` · ${s.assists} asist` : ""}</b></div>`).join("") + `</div>`;
+  }
+
+  const rec = myEntry ? `O ${statVal(myEntry, "gamesPlayed", "GP")} · ${statVal(myEntry, "wins", "W")}G ${statVal(myEntry, "ties", "D")}B ${statVal(myEntry, "losses", "L")}M · ${statVal(myEntry, "points", "P", "PTS")} puan` : "";
 
   const html = `
     <div class="md-header">
-      ${logo ? `<img src="${esc(logo)}" alt="" style="width:56px;height:56px;object-fit:contain">` : ""}
-      <div style="font-size:21px;font-weight:800;margin-top:6px">${esc(name)}</div>
+      ${logo ? `<img src="${esc(logo)}" alt="" style="width:60px;height:60px;object-fit:contain">` : ""}
+      <div style="font-size:22px;font-weight:800;margin-top:6px">${esc(name)}</div>
       ${groupName ? `<div class="md-venue">${esc(groupName)}</div>` : ""}
-      <button class="pred-save" id="favToggle" data-fav-team="${esc(teamId)}" style="margin-top:10px">${isFav ? "⭐ Favorilerden çıkar" : "☆ Favorilere ekle"}</button>
+      ${rec ? `<div class="md-venue">${esc(rec)}</div>` : ""}
+      <button class="pred-save" id="favToggle" data-fav-team="${esc(teamId)}" style="margin-top:10px;max-width:260px">${isFav ? "⭐ Favorilerden çıkar" : "☆ Favorilere ekle"}</button>
     </div>
-    ${groupHTML}
     <div class="section-title">Maçları</div>
-    ${matches.map(matchCardHTML).join("") || emptyHTML("📅", "Maç bulunamadı.")}`;
+    ${matches.map(matchCardHTML).join("") || emptyHTML("📅", "Maç bulunamadı.")}
+    ${scorerHTML}
+    ${injHTML}
+    ${squadHTML ? `<div class="section-title">Kadro</div><div class="squad">${squadHTML}</div><div class="pred-note">İlk 11, maç günü açıklanınca maç ekranında görünür.</div>` : ""}
+    ${groupHTML}`;
   openSheet(html);
 
   $("#sheetContent").onclick = (e) => {
@@ -1232,12 +1295,15 @@ function openTeam(teamId) {
       else state.favs.push(id);
       store.set("favs", state.favs);
       ft.textContent = state.favs.includes(id) ? "⭐ Favorilerden çıkar" : "☆ Favorilere ekle";
+      haptic(6);
       syncPushProfile();
       render();
       return;
     }
+    const trow = e.target.closest("[data-teampage]");
+    if (trow && trow.dataset.teampage !== teamId) { const tid = trow.dataset.teampage; navPush(() => openTeam(tid)); return; }
     const card = e.target.closest("[data-match]");
-    if (card) openMatch(card.dataset.match);
+    if (card) { const mid = card.dataset.match; navPush(() => openMatch(mid)); }
   };
 }
 
@@ -1354,7 +1420,7 @@ function openPredictions() {
   openSheet(html);
   $("#sheetContent").onclick = (e) => {
     const card = e.target.closest("[data-match]");
-    if (card) openMatch(card.dataset.match);
+    if (card) { const mid = card.dataset.match; navPush(() => openMatch(mid)); }
   };
 }
 
@@ -1435,7 +1501,7 @@ function renderSettings() {
   openSheet(html);
 
   $("#sheetContent").onclick = async (e) => {
-    if (e.target.closest("#openFavs")) { renderFavorites(); return; }
+    if (e.target.closest("#openFavs")) { navPush(() => renderFavorites()); return; }
     if (e.target.closest("#swNotif")) {
       const sw = e.target.closest("#swNotif");
       if (!("Notification" in window)) { alert("Bu tarayıcı bildirim desteklemiyor."); return; }
@@ -1502,47 +1568,50 @@ function applyTheme() {
   if (meta) meta.content = t === "light" ? "#f2f5fa" : "#0a1628";
 }
 
-/* ============ Sheet ============ */
+/* ============ Sheet (popup + geri yığını) ============ */
+let sheetStack = [];
 let _sheetClosing = false;
+
+// düşük seviye: popup'ı açık tut ve içeriği doldur (yığını değiştirmez)
 function openSheet(html) {
   clearTimeout(openMatch._timer);
-  _sheetClosing = false;
-  const sheet = $("#sheet"), overlay = $("#sheetOverlay");
-  sheet.classList.remove("closing", "dragging", "settling");
-  sheet.style.transform = "";
-  overlay.style.opacity = "";
-  $("#sheetContent").onclick = null;
-  $("#sheetContent").scrollTop = 0;
-  $("#sheetContent").innerHTML = html;
-  overlay.classList.remove("hidden");
+  const overlay = $("#sheetOverlay");
+  overlay.classList.remove("hidden", "closing");
+  const sc = $("#sheetContent");
+  sc.onclick = null;
+  sc.scrollTop = 0;
+  sc.innerHTML = html;
   document.body.style.overflow = "hidden";
+  $("#sheetBack").classList.toggle("hidden", sheetStack.length <= 1);
 }
-function closeSheet() {
+
+// yeni popup aç (yığını sıfırla): bir sekmeden/başlıktan açılırken
+function navOpen(fn) { sheetStack = [fn]; fn(); }
+// derine in (geri ile dönülebilir): popup içinden açılırken
+function navPush(fn) { sheetStack.push(fn); fn(); }
+// geri: bir önceki ekrana dön, kök ise tamamen kapat
+function navBack() {
+  if (sheetStack.length > 1) { sheetStack.pop(); sheetStack[sheetStack.length - 1](); }
+  else dismissSheet();
+}
+
+function dismissSheet() {
   if (_sheetClosing) return;
   _sheetClosing = true;
   clearTimeout(openMatch._timer);
   openMatch._id = null;
-  const sheet = $("#sheet"), overlay = $("#sheetOverlay");
-  sheet.classList.remove("settling", "dragging");
-  sheet.classList.add("closing");
-  // sürükleme konumundan tabana doğal kayış
-  void sheet.offsetHeight;
-  overlay.style.transition = "opacity 0.3s ease";
-  sheet.style.transform = "translateY(100%)";
-  overlay.style.opacity = "0";
-  const done = () => {
-    sheet.removeEventListener("transitionend", done);
+  sheetStack = [];
+  const overlay = $("#sheetOverlay");
+  overlay.classList.add("closing");
+  setTimeout(() => {
     overlay.classList.add("hidden");
-    sheet.classList.remove("closing");
-    sheet.style.transform = "";
-    overlay.style.opacity = "";
-    overlay.style.transition = "";
+    overlay.classList.remove("closing");
     document.body.style.overflow = "";
     _sheetClosing = false;
-  };
-  sheet.addEventListener("transitionend", done, { once: true });
-  setTimeout(done, 360); // güvenlik
+  }, 200);
 }
+// geriye donuk uyumluluk
+function closeSheet() { dismissSheet(); }
 
 /* ============ Olaylar ============ */
 document.querySelectorAll(".tab").forEach((b) => {
@@ -1568,7 +1637,7 @@ view.addEventListener("click", (e) => {
     render();
     return;
   }
-  if (e.target.closest("#predChip")) { openPredictions(); return; }
+  if (e.target.closest("#predChip")) { navOpen(() => openPredictions()); return; }
   if (e.target.closest("#ligJoin")) { joinLeague(); return; }
   if (e.target.closest("#ligRename")) {
     if (window.lig) window.lig.logout();
@@ -1576,13 +1645,13 @@ view.addEventListener("click", (e) => {
     render();
     return;
   }
-  if (e.target.closest("#openPicks")) { openPicks(); return; }
+  if (e.target.closest("#openPicks")) { navOpen(() => openPicks()); return; }
   const lrow = e.target.closest("[data-liguser]");
-  if (lrow) { openLeagueUser(lrow.dataset.liguser); return; }
+  if (lrow) { const id = lrow.dataset.liguser; navOpen(() => openLeagueUser(id)); return; }
   const trow = e.target.closest("[data-teampage]");
-  if (trow) { openTeam(trow.dataset.teampage); return; }
+  if (trow) { const id = trow.dataset.teampage; navOpen(() => openTeam(id)); return; }
   const card = e.target.closest("[data-match]");
-  if (card) openMatch(card.dataset.match);
+  if (card) { const id = card.dataset.match; navOpen(() => openMatch(id)); }
 });
 
 async function loginToLeague(username, pin, code) {
@@ -1763,78 +1832,21 @@ function openLeagueUser(uid) {
     ${mine ? "" : `<div class="pred-note">🔒 Tahminler maç/turnuva başlayana kadar gizlidir.</div>`}`);
   $("#sheetContent").onclick = (e) => {
     const card = e.target.closest("[data-match]");
-    if (card) openMatch(card.dataset.match);
+    if (card) { const mid = card.dataset.match; navPush(() => openMatch(mid)); }
   };
 }
 
-$("#sheetOverlay").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeSheet(); });
-$("#sheetClose").addEventListener("click", closeSheet);
+$("#sheetOverlay").addEventListener("click", (e) => { if (e.target === e.currentTarget) dismissSheet(); });
+$("#sheetClose").addEventListener("click", navBack);
+$("#sheetBack").addEventListener("click", navBack);
 $("#btnSettings").addEventListener("click", async () => {
   if (!state.teamsCache) { try { await loadStandings(); } catch {} }
-  renderSettings();
+  navOpen(() => renderSettings());
 });
 $("#btnFavs").addEventListener("click", async () => {
   if (!state.teamsCache) { try { await loadStandings(); } catch {} }
-  renderFavorites();
+  navOpen(() => renderFavorites());
 });
-
-/* aşağı sürükleyerek sheet'i kapat (doğal, hız duyarlı) */
-(function setupSheetDrag() {
-  const handle = $("#sheetHandle");
-  const sheet = $("#sheet");
-  const content = $("#sheetContent");
-  const overlay = $("#sheetOverlay");
-  let startY = 0, dy = 0, dragging = false, h = 600, lastY = 0, lastT = 0, vel = 0;
-
-  function start(y, fromHandle) {
-    if (_sheetClosing) return;
-    // tutamaçtan her zaman; içerikten yalnızca en üstteyken
-    if (!fromHandle && content.scrollTop > 0) return;
-    dragging = true; startY = y; dy = 0; lastY = y; lastT = Date.now(); vel = 0;
-    h = sheet.offsetHeight || 600;
-    sheet.classList.remove("settling", "closing");
-    sheet.classList.add("dragging");
-    overlay.style.transition = "none";
-  }
-  function move(y, e) {
-    if (!dragging) return;
-    let d = y - startY;
-    if (d < 0) d = d * 0.25; // yukarı çekişte hafif direnç
-    dy = d;
-    const now = Date.now();
-    if (now > lastT) { vel = (y - lastY) / (now - lastT); lastY = y; lastT = now; } // px/ms
-    if (d > 0 && e && e.cancelable) e.preventDefault();
-    sheet.style.transform = `translateY(${Math.max(d, 0)}px)`;
-    overlay.style.opacity = String(Math.max(0.15, 1 - Math.max(d, 0) / (h * 0.85)));
-  }
-  function end() {
-    if (!dragging) return;
-    dragging = false;
-    sheet.classList.remove("dragging");
-    // hızlı aşağı fırlatma ya da yeterince uzağa çekme → kapat
-    if (vel > 0.5 || dy > h * 0.28) {
-      closeSheet();
-    } else {
-      // yumuşak geri yaylanma
-      sheet.classList.add("settling");
-      overlay.style.transition = "opacity 0.34s ease";
-      sheet.style.transform = "";
-      overlay.style.opacity = "";
-      setTimeout(() => { sheet.classList.remove("settling"); overlay.style.transition = ""; }, 360);
-    }
-  }
-
-  handle.addEventListener("touchstart", (e) => start(e.touches[0].clientY, true), { passive: true });
-  content.addEventListener("touchstart", (e) => start(e.touches[0].clientY, false), { passive: true });
-  sheet.addEventListener("touchmove", (e) => move(e.touches[0].clientY, e), { passive: false });
-  sheet.addEventListener("touchend", end, { passive: true });
-  sheet.addEventListener("touchcancel", end, { passive: true });
-
-  // masaüstü: tutamaçtan fare ile sürükleme
-  handle.addEventListener("mousedown", (e) => { start(e.clientY, true); e.preventDefault(); });
-  window.addEventListener("mousemove", (e) => { if (dragging) move(e.clientY, null); });
-  window.addEventListener("mouseup", end);
-})();
 $("#btnRefresh").addEventListener("click", async () => {
   const btn = $("#btnRefresh");
   btn.classList.add("spinning");
