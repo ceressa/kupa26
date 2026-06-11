@@ -8,8 +8,7 @@ import {
 import { getMessaging, getToken, isSupported } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging.js";
 
 // Firebase Console > Proje Ayarlari > Cloud Messaging > Web Push sertifikalari > Anahtar cifti
-// Buraya o "Anahtar cifti" degerini yapistir (B... ile baslar). Bos kalirsa arka plan bildirimi devre disi.
-const VAPID_KEY = "";
+const VAPID_KEY = "BCm25YHybc5do9VzgPAa1vKCRz5YNuN_WtxMMOnXZcGxEY4yL7e52WOiBoda3R4enWVbMjtt5xyJBVJrEtI2ZC4";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAkmaq0nFi4322Qm7DlyFe0_7aNg8Ck4bE",
