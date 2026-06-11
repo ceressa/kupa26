@@ -263,6 +263,7 @@ body {
 .hero-mid { text-align: center; }
 .hero-score { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .hero-vs { font-size: 14px; color: var(--muted); font-weight: 700; }
+.tsi { font-size: 9px; font-weight: 600; color: var(--muted); margin-left: 4px; vertical-align: middle; opacity: 0.75; }
 .hero-countdown {
   margin-top: 10px;
   text-align: center;
@@ -466,6 +467,7 @@ table.standings {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  will-change: opacity;
 }
 .sheet {
   background: var(--bg2);
@@ -475,12 +477,16 @@ table.standings {
   max-height: 88dvh;
   display: flex;
   flex-direction: column;
-  animation: slideUp 0.22s ease;
+  animation: slideUp 0.30s cubic-bezier(0.22, 1, 0.36, 1);
   touch-action: pan-y;
+  will-change: transform;
 }
 .sheet.dragging { animation: none; transition: none; }
-.sheet.closing { transition: transform 0.2s ease; }
-@keyframes slideUp { from { transform: translateY(40px); opacity: 0.5; } to { transform: none; opacity: 1; } }
+/* yumuşak geri yaylanma (hafif yay hissi) */
+.sheet.settling { animation: none; transition: transform 0.34s cubic-bezier(0.22, 1.2, 0.4, 1); }
+/* doğal aşağı kayarak kapanış */
+.sheet.closing { animation: none; transition: transform 0.32s cubic-bezier(0.4, 0.0, 0.2, 1); }
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .sheet-handle {
   position: relative;
   flex-shrink: 0;

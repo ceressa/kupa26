@@ -70,21 +70,32 @@ function trName(team) {
 }
 function trPlaceholder(n) {
   return n
-    .replace(/Group ([A-L]) (Winner|winner)/, "$1 Grubu 1.si")
-    .replace(/Group ([A-L]) Runner[- ]?up/i, "$1 Grubu 2.si")
+    .replace(/^Group ([A-L]) Winner$/i, "$1 Grubu 1.si")
+    .replace(/^Group ([A-L]) (?:2nd Place|Runner[- ]?up)$/i, "$1 Grubu 2.si")
+    .replace(/^Round of 32 (\d+) Winner$/i, "Son 32: $1 Galibi")
+    .replace(/^Round of 16 (\d+) Winner$/i, "Son 16: $1 Galibi")
+    .replace(/^Quarterfinal (\d+) Winner$/i, "Çeyrek $1 Galibi")
+    .replace(/^Semifinal (\d+) Winner$/i, "Yarı $1 Galibi")
+    .replace(/^Semifinal (\d+) Loser$/i, "Yarı $1 Mağlubu")
+    .replace(/^Third Place Group (.+)$/i, "3.lük: $1")
+    // genel yedekler
     .replace(/Round of 32/gi, "Son 32").replace(/Round of 16/gi, "Son 16")
     .replace(/Quarterfinal/gi, "Çeyrek Final").replace(/Semifinal/gi, "Yarı Final")
+    .replace(/Third Place/gi, "3.lük").replace(/\bGroup\b/gi, "Grup")
     .replace(/\bMatch\b/gi, "Maç").replace(/\bGame\b/gi, "Maç")
-    .replace(/(\d+) Winner/g, "$1 Galibi").replace(/(\d+) Loser/g, "$1 Kaybedeni")
-    .replace(/Winner/g, "Galibi").replace(/Loser/g, "Kaybedeni")
-    .replace(/TBD/g, "Belirlenecek");
+    .replace(/(\d+) Winner/g, "$1 Galibi").replace(/(\d+) Loser/g, "$1 Mağlubu")
+    .replace(/Winner/gi, "Galibi").replace(/Loser/gi, "Mağlubu")
+    .replace(/Runner[- ]?up/gi, "2.si").replace(/2nd Place/gi, "2.si").replace(/1st Place/gi, "1.si")
+    .replace(/\bTBD\b/gi, "Belirlenecek");
 }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-function fmtTime(d) { return new Date(d).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }); }
-function fmtDayHeader(d) {
-  return new Date(d).toLocaleDateString("tr-TR", { day: "numeric", month: "long", weekday: "long" });
-}
-function dayKey(d) { const x = new Date(d); return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0"); }
+
+// Tüm saat/tarihler Türkiye saatine (Europe/Istanbul) sabit, cihazdan bağımsız.
+const TZ = "Europe/Istanbul";
+function fmtTime(d) { return new Date(d).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: TZ }); }
+function fmtDate(d, opts) { return new Date(d).toLocaleDateString("tr-TR", Object.assign({ timeZone: TZ }, opts)); }
+function fmtDayHeader(d) { return fmtDate(d, { day: "numeric", month: "long", weekday: "long" }); }
+function dayKey(d) { return new Date(d).toLocaleDateString("en-CA", { timeZone: TZ }); }
 function roundOf(dateStr) {
   const t = new Date(dateStr).getTime();
   for (const r of ROUNDS) if (t < new Date(r.end).getTime()) return r;
@@ -363,7 +374,7 @@ function heroHTML(m) {
   const live = m.state === "in";
   let mid, foot;
   if (m.state === "pre") {
-    mid = `<div class="hero-vs">${fmtTime(m.date)}</div>`;
+    mid = `<div class="hero-vs">${fmtTime(m.date)}<span class="tsi">TSİ</span></div>`;
     foot = `<div class="hero-countdown" data-countdown="${esc(m.date)}"></div>`;
   } else {
     mid = `<div class="hero-score">${esc(m.home.score ?? "")} - ${esc(m.away.score ?? "")}</div>`;
@@ -733,7 +744,7 @@ function renderBracket() {
         ? `<span class="live">● ${esc(m.clock || "CANLI")}</span><span>${esc(m.venue)}</span>`
         : pickable && !koPick
         ? `<span class="bm-pickhint">🌳 tahmin için dokun</span><span>${m.state === "pre" ? fmtTime(m.date) : ""}</span>`
-        : `<span>${new Date(m.date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} ${m.state === "pre" ? fmtTime(m.date) : "MS"}</span><span>${esc(m.city.split(",")[0] || "")}</span>`;
+        : `<span>${fmtDate(m.date, { day: "numeric", month: "short" })} ${m.state === "pre" ? fmtTime(m.date) : "MS"}</span><span>${esc(m.city.split(",")[0] || "")}</span>`;
       return `<div class="bracket-match ${fav ? "fav" : ""} ${live ? "live" : ""}" data-match="${m.id}">
         ${row(m.home)}${row(m.away)}
         <div class="bm-foot">${foot}</div>
@@ -937,7 +948,7 @@ async function openMatch(id, silent) {
     const mid = pre
       ? `<div class="md-score" style="font-size:22px">${fmtTime(comp.date)}</div>`
       : `<div class="md-score">${esc(home.score ?? "")} - ${esc(away.score ?? "")}</div>`;
-    const statusTxt = live ? (st.displayClock || "CANLI") : pre ? new Date(comp.date).toLocaleDateString("tr-TR", { day: "numeric", month: "long", weekday: "long" }) : "Maç Sonu";
+    const statusTxt = live ? (st.displayClock || "CANLI") : pre ? `${fmtDate(comp.date, { day: "numeric", month: "long", weekday: "long" })} · ${fmtTime(comp.date)} TSİ` : "Maç Sonu";
     const venue = j.gameInfo && j.gameInfo.venue;
     html += `<div class="md-header">
       <div class="md-round">${esc((m ? m.round.name : ""))}</div>
@@ -1089,7 +1100,7 @@ async function openMatch(id, silent) {
       const rowsH = h2hEvents.slice(0, 6).map((g) => {
         const d = new Date(g.gameDate);
         return `<div class="h2h-row">
-          <span class="h2h-date">${d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "2-digit" })}</span>
+          <span class="h2h-date">${fmtDate(d, { day: "numeric", month: "short", year: "2-digit" })}</span>
           <span class="h2h-score">${esc(g.homeTeamScore ?? "")} - ${esc(g.awayTeamScore ?? "")}</span>
           <span class="h2h-comp">${esc(g.leagueName || g.competitionName || "")}</span>
         </div>`;
@@ -1327,7 +1338,7 @@ function openPredictions() {
       const badge = sc === null ? `<span class="pp ppwait">bekliyor</span>` : sc === 3 ? `<span class="pp pp3">+3</span>` : sc === 1 ? `<span class="pp pp1">+1</span>` : `<span class="pp pp0">0</span>`;
       const actual = m.state === "pre" ? fmtTime(m.date) : `${m.home.score ?? ""} - ${m.away.score ?? ""}`;
       return `<div class="pred-row" data-match="${m.id}">
-        <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${new Date(m.date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} · Sonuç: ${esc(actual)}</small></div>
+        <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${fmtDate(m.date, { day: "numeric", month: "short" })} · Sonuç: ${esc(actual)}</small></div>
         <div class="pred-row-val">${p.h} - ${p.a}</div>
         ${badge}
       </div>`;
@@ -1492,30 +1503,45 @@ function applyTheme() {
 }
 
 /* ============ Sheet ============ */
+let _sheetClosing = false;
 function openSheet(html) {
   clearTimeout(openMatch._timer);
-  const sheet = $("#sheet");
-  sheet.classList.remove("closing", "dragging");
+  _sheetClosing = false;
+  const sheet = $("#sheet"), overlay = $("#sheetOverlay");
+  sheet.classList.remove("closing", "dragging", "settling");
   sheet.style.transform = "";
+  overlay.style.opacity = "";
   $("#sheetContent").onclick = null;
   $("#sheetContent").scrollTop = 0;
   $("#sheetContent").innerHTML = html;
-  $("#sheetOverlay").classList.remove("hidden");
+  overlay.classList.remove("hidden");
   document.body.style.overflow = "hidden";
 }
 function closeSheet() {
+  if (_sheetClosing) return;
+  _sheetClosing = true;
   clearTimeout(openMatch._timer);
   openMatch._id = null;
-  const sheet = $("#sheet");
-  // aşağı kayarak kapanma animasyonu
+  const sheet = $("#sheet"), overlay = $("#sheetOverlay");
+  sheet.classList.remove("settling", "dragging");
   sheet.classList.add("closing");
+  // sürükleme konumundan tabana doğal kayış
+  void sheet.offsetHeight;
+  overlay.style.transition = "opacity 0.3s ease";
   sheet.style.transform = "translateY(100%)";
-  setTimeout(() => {
-    $("#sheetOverlay").classList.add("hidden");
+  overlay.style.opacity = "0";
+  const done = () => {
+    sheet.removeEventListener("transitionend", done);
+    overlay.classList.add("hidden");
     sheet.classList.remove("closing");
     sheet.style.transform = "";
+    overlay.style.opacity = "";
+    overlay.style.transition = "";
     document.body.style.overflow = "";
-  }, 200);
+    _sheetClosing = false;
+  };
+  sheet.addEventListener("transitionend", done, { once: true });
+  setTimeout(done, 360); // güvenlik
 }
 
 /* ============ Olaylar ============ */
@@ -1698,7 +1724,7 @@ function openLeagueUser(uid) {
         : sc === 3 ? `<span class="pp pp3">+3</span>` : sc === 1 ? `<span class="pp pp1">+1</span>` : `<span class="pp pp0">0</span>`;
       const actual = m.state === "pre" ? fmtTime(m.date) : `${m.home.score ?? ""} - ${m.away.score ?? ""}`;
       return `<div class="pred-row" data-match="${m.id}">
-        <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${new Date(m.date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })} · ${esc(actual)}</small></div>
+        <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${fmtDate(m.date, { day: "numeric", month: "short" })} · ${esc(actual)}</small></div>
         <div class="pred-row-val">${hidden ? "🔒" : `${p.h} - ${p.a}`}</div>
         ${hidden ? `<span class="pp ppwait">gizli</span>` : badge}
       </div>`;
@@ -1752,38 +1778,57 @@ $("#btnFavs").addEventListener("click", async () => {
   renderFavorites();
 });
 
-/* aşağı sürükleyerek sheet'i kapat */
+/* aşağı sürükleyerek sheet'i kapat (doğal, hız duyarlı) */
 (function setupSheetDrag() {
   const handle = $("#sheetHandle");
   const sheet = $("#sheet");
   const content = $("#sheetContent");
-  let startY = 0, dy = 0, dragging = false;
+  const overlay = $("#sheetOverlay");
+  let startY = 0, dy = 0, dragging = false, h = 600, lastY = 0, lastT = 0, vel = 0;
 
   function start(y, fromHandle) {
-    // içerik en üstteyse ya da tutamaçtan başlıyorsa sürüklemeye izin ver
+    if (_sheetClosing) return;
+    // tutamaçtan her zaman; içerikten yalnızca en üstteyken
     if (!fromHandle && content.scrollTop > 0) return;
-    dragging = true; startY = y; dy = 0;
+    dragging = true; startY = y; dy = 0; lastY = y; lastT = Date.now(); vel = 0;
+    h = sheet.offsetHeight || 600;
+    sheet.classList.remove("settling", "closing");
     sheet.classList.add("dragging");
+    overlay.style.transition = "none";
   }
   function move(y, e) {
     if (!dragging) return;
-    dy = y - startY;
-    if (dy < 0) dy = 0;
-    if (dy > 0 && e && e.cancelable) e.preventDefault();
-    sheet.style.transform = `translateY(${dy}px)`;
+    let d = y - startY;
+    if (d < 0) d = d * 0.25; // yukarı çekişte hafif direnç
+    dy = d;
+    const now = Date.now();
+    if (now > lastT) { vel = (y - lastY) / (now - lastT); lastY = y; lastT = now; } // px/ms
+    if (d > 0 && e && e.cancelable) e.preventDefault();
+    sheet.style.transform = `translateY(${Math.max(d, 0)}px)`;
+    overlay.style.opacity = String(Math.max(0.15, 1 - Math.max(d, 0) / (h * 0.85)));
   }
   function end() {
     if (!dragging) return;
     dragging = false;
     sheet.classList.remove("dragging");
-    if (dy > 90) { closeSheet(); }
-    else { sheet.style.transform = ""; }
+    // hızlı aşağı fırlatma ya da yeterince uzağa çekme → kapat
+    if (vel > 0.5 || dy > h * 0.28) {
+      closeSheet();
+    } else {
+      // yumuşak geri yaylanma
+      sheet.classList.add("settling");
+      overlay.style.transition = "opacity 0.34s ease";
+      sheet.style.transform = "";
+      overlay.style.opacity = "";
+      setTimeout(() => { sheet.classList.remove("settling"); overlay.style.transition = ""; }, 360);
+    }
   }
 
   handle.addEventListener("touchstart", (e) => start(e.touches[0].clientY, true), { passive: true });
   content.addEventListener("touchstart", (e) => start(e.touches[0].clientY, false), { passive: true });
   sheet.addEventListener("touchmove", (e) => move(e.touches[0].clientY, e), { passive: false });
   sheet.addEventListener("touchend", end, { passive: true });
+  sheet.addEventListener("touchcancel", end, { passive: true });
 
   // masaüstü: tutamaçtan fare ile sürükleme
   handle.addEventListener("mousedown", (e) => { start(e.clientY, true); e.preventDefault(); });
