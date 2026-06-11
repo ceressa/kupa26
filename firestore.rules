@@ -7,12 +7,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // uyelik: lige katilmak icin dogru davet kodu gerekir. Kod yalnizca kendi dokumaninda tutulur.
+    // uyelik: yalnizca enterLeague fonksiyonu (admin) yazar. Istemci yazamaz.
     match /members/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
-      allow create, update: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.code is string
-        && request.resource.data.code == get(/databases/$(database)/documents/config/league).data.code;
+      allow write: if false;
     }
 
     match /users/{uid} {

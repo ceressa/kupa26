@@ -1,10 +1,11 @@
-// Tahmin ligi: Firebase Firestore + anonim giris.
+// Tahmin ligi: Firebase Firestore + kullanici adi/PIN (custom token) girisi.
 // Klasik app.js bu modulu window.lig uzerinden kullanir.
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getAuth, signInWithCustomToken, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, getDoc, getDocs, collection, collectionGroup, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 import { getMessaging, getToken, isSupported } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging.js";
 
 // Firebase Console > Proje Ayarlari > Cloud Messaging > Web Push sertifikalari > Anahtar cifti
@@ -22,18 +23,21 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const functions = getFunctions(app, "europe-west1");
 
 let user = null;
 const authReady = new Promise((resolve) => {
   onAuthStateChanged(auth, (u) => { user = u; resolve(u); });
 });
 
-async function ensureSignedIn() {
+// oturum acik mi? (custom token ile giris yapilmis kullanici)
+async function currentUser() {
   await authReady;
-  if (!user) {
-    const cred = await signInAnonymously(auth);
-    user = cred.user;
-  }
+  return user;
+}
+// yazma islemleri icin giris sart; degilse hata
+function requireUser() {
+  if (!user) throw new Error("not-signed-in");
   return user;
 }
 
@@ -41,6 +45,31 @@ let messaging = null;
 
 window.lig = {
   myUid() { return user ? user.uid : null; },
+  async ready() { return await currentUser(); },
+  async signedIn() { return !!(await currentUser()); },
+
+  // kullanici adi + PIN + davet koduyla giris/kayit. Ayni ad+PIN her cihazda ayni hesap.
+  async login(username, pin, code) {
+    await authReady;
+    let res;
+    try {
+      res = await httpsCallable(functions, "enterLeague")({ username, pin, code });
+    } catch (e) {
+      const msg = (e && e.message) || "";
+      const err = new Error(/bad-code/.test(msg) ? "bad-code" : (e && e.code) || "error");
+      throw err;
+    }
+    const token = res && res.data && res.data.token;
+    if (!token) throw new Error("no-token");
+    const cred = await signInWithCustomToken(auth, token);
+    user = cred.user;
+    return user.uid;
+  },
+
+  async logout() {
+    try { await signOut(auth); } catch {}
+    user = null;
+  },
 
   pushAvailable() { return !!VAPID_KEY; },
 
@@ -48,7 +77,7 @@ window.lig = {
   async enablePush() {
     if (!VAPID_KEY) throw new Error("no-vapid");
     if (!(await isSupported().catch(() => false))) throw new Error("unsupported");
-    const u = await ensureSignedIn();
+    const u = requireUser();
     const perm = await Notification.requestPermission();
     if (perm !== "granted") throw new Error("denied");
     const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
@@ -61,48 +90,25 @@ window.lig = {
 
   // favori takimlar ve bildirim tercihlerini buluta yaz (push yonlendirmesi icin)
   async saveProfile(favs, prefs) {
-    const u = await ensureSignedIn();
+    const u = requireUser();
     await setDoc(doc(db, "users", u.uid), { favs: (favs || []).map(String), notifPrefs: prefs || {} }, { merge: true });
-  },
-
-  // takma ad + davet koduyla lige katil. Kod kuralda dogrulanir; yanlissa hata firlatir.
-  async join(name, code) {
-    const u = await ensureSignedIn();
-    try {
-      await setDoc(doc(db, "members", u.uid), { code: String(code || ""), t: serverTimestamp() });
-    } catch (e) {
-      const err = new Error("bad-code");
-      err.code = (e && e.code) || "permission-denied";
-      throw err;
-    }
-    await setDoc(doc(db, "users", u.uid), { name: String(name).slice(0, 20) }, { merge: true });
-    return u.uid;
-  },
-
-  // bu cihaz daha once dogru kodla katildi mi?
-  async isMember() {
-    const u = await ensureSignedIn();
-    try {
-      const s = await getDoc(doc(db, "members", u.uid));
-      return s.exists();
-    } catch { return false; }
   },
 
   // tahmini buluta yaz; t sunucu damgasi (kurallar zorunlu kiliyor)
   async savePred(matchId, h, a) {
-    const u = await ensureSignedIn();
+    const u = requireUser();
     await setDoc(doc(db, "users", u.uid, "preds", String(matchId)), { h, a, t: serverTimestamp() });
   },
 
   // turnuva tahmini: key = "group-A".."group-L" -> {first, second} | "champion" -> {team}
   async savePick(key, data) {
-    const u = await ensureSignedIn();
+    const u = requireUser();
     await setDoc(doc(db, "users", u.uid, "picks", String(key)), { ...data, t: serverTimestamp() });
   },
 
   // tum lig verisi: [{uid, name, preds: {matchId: {h, a, tMillis}}, picks: {key: {..., tMillis}}}]
   async fetchLeague() {
-    await ensureSignedIn();
+    requireUser();
     const [usersSnap, predsSnap, picksSnap] = await Promise.all([
       getDocs(collection(db, "users")),
       getDocs(collectionGroup(db, "preds")),

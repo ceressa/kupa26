@@ -48,6 +48,7 @@ const state = {
   filter: store.get("filter", "all"),
   preds: store.get("preds", {}),
   lig: store.get("lig", null),
+  signedIn: false,
   picks: store.get("picks", {}),
   reminded: store.get("reminded", {}),
   league: null,
@@ -491,13 +492,13 @@ function leagueScore(predsMap) {
 
 // favori + bildirim tercihlerini buluta yaz (push yönlendirmesi için)
 function syncPushProfile() {
-  if (!window.lig || !state.notif.enabled) return;
+  if (!window.lig || !state.signedIn || !state.notif.enabled) return;
   const prefs = { scope: state.notif.scope || "favs", goals: true, starts: true, ends: true, reminders: true };
   window.lig.saveProfile(state.favs, prefs).catch(() => {});
 }
 
 async function loadLeague(force) {
-  if (!window.lig || !state.lig) return;
+  if (!window.lig || !state.signedIn) return;
   const now = Date.now();
   if (!force && state.league && now - state.leagueAt < 60_000) return;
   state.league = await window.lig.fetchLeague();
@@ -576,7 +577,7 @@ function savePickLocalAndCloud(key, data) {
   state.picks[key] = { ...data };
   store.set("picks", state.picks);
   haptic(8);
-  if (state.lig && window.lig) {
+  if (state.signedIn && window.lig) {
     window.lig.savePick(key, data).then(() => { state.leagueAt = 0; }).catch(() => {});
   }
 }
@@ -727,17 +728,19 @@ function renderLeague() {
     window.addEventListener("lig-ready", () => { if (state.tab === "league") refreshForTab(); }, { once: true });
     return;
   }
-  if (!state.lig || !state.lig.member) {
+  if (!state.signedIn) {
     const savedName = state.lig && state.lig.name ? esc(state.lig.name) : "";
     view.innerHTML = `
       <div class="join-card">
         <div class="join-emoji">🏅</div>
         <h2>Tahmin Ligi</h2>
-        <p>Takma adın ve davet kodunla katıl, tahminlerinle arkadaşlarına karşı yarış. Doğru skor 3 puan, doğru sonuç 1 puan. Başkalarının tahminleri maç başlayana kadar gizli kalır.</p>
-        <input id="ligName" type="text" maxlength="20" placeholder="Takma adın (örn. Ufuk)" autocomplete="nickname" value="${savedName}">
+        <p>Kullanıcı adın, PIN ve davet koduyla gir. <b>Aynı ad ve PIN'le her cihazdan aynı hesaba girersin</b>, verin bulutta durur, e-posta gerekmez. Yeni biriysen bir ad ve PIN belirle; gelecekte onlarla geri dönersin.</p>
+        <input id="ligName" type="text" maxlength="20" placeholder="Kullanıcı adın (örn. Ufuk)" autocomplete="username" value="${savedName}">
+        <input id="ligPin" type="password" maxlength="32" placeholder="PIN (en az 4 hane, kendine özel)" autocomplete="current-password" inputmode="numeric">
         <input id="ligCode" type="text" maxlength="40" placeholder="Davet kodu" autocomplete="off" autocapitalize="off">
-        <button id="ligJoin" class="pred-save">Lige Katıl</button>
+        <button id="ligJoin" class="pred-save">Gir / Katıl</button>
         <div class="pred-note" id="ligErr"></div>
+        <div class="pred-note">PIN'ini unutma: hesabına dönmenin tek yolu ad + PIN. Kimseyle paylaşma.</div>
       </div>`;
     return;
   }
@@ -766,7 +769,7 @@ function renderLeague() {
       <div><div class="scorer-goals">${u.grand}</div><div class="scorer-sub">puan</div></div>
     </div>`;
   });
-  html += `<div class="attribution">Adını değiştirmek için tekrar katıl: <button class="link-btn" id="ligRename">takma adı değiştir</button></div>`;
+  html += `<div class="attribution">Bu cihazdan çıkış yap: <button class="link-btn" id="ligRename">çıkış</button><br>Başka cihazda aynı ad + PIN ile girersen aynı hesap.</div>`;
   view.innerHTML = html;
 }
 
@@ -1042,7 +1045,7 @@ async function openMatch(id, silent) {
         store.set("preds", state.preds);
         haptic(12);
         save.textContent = "Kaydedildi ✓";
-        if (state.lig && window.lig) {
+        if (state.signedIn && window.lig) {
           window.lig.savePred(save.dataset.predMatch, h, a)
             .then(() => { state.leagueAt = 0; })
             .catch(() => { save.textContent = "Kaydedildi (lige gönderilemedi)"; });
@@ -1308,12 +1311,16 @@ function renderSettings() {
         state.notif.enabled = p === "granted";
         if (p === "granted") {
           showNotif("🔔 Bildirimler açık", "Gol ve maç bildirimleri buradan gelecek.", "test");
-          // arka plan push'u da kaydet (varsa) + profili buluta yaz
+          // arka plan push'u da kaydet (varsa, lige giriş yapıldıysa) + profili buluta yaz
+          const ps = $("#pushStatus");
           if (window.lig && window.lig.pushAvailable && window.lig.pushAvailable()) {
-            const ps = $("#pushStatus");
-            window.lig.enablePush()
-              .then(() => { syncPushProfile(); if (ps) ps.textContent = "✅ Arka plan bildirimi aktif (uygulama kapalıyken de gelir)."; })
-              .catch((err) => { if (ps) ps.textContent = "⚠️ Arka plan bildirimi kurulamadı (" + (err && err.message ? err.message : "hata") + "). Açıkken bildirim yine gelir."; });
+            if (!state.signedIn) {
+              if (ps) ps.textContent = "ℹ️ Arka plan bildirimi için Lig sekmesinden giriş yap. Açıkken bildirim yine gelir.";
+            } else {
+              window.lig.enablePush()
+                .then(() => { syncPushProfile(); if (ps) ps.textContent = "✅ Arka plan bildirimi aktif (uygulama kapalıyken de gelir)."; })
+                .catch((err) => { if (ps) ps.textContent = "⚠️ Arka plan bildirimi kurulamadı (" + (err && err.message ? err.message : "hata") + "). Açıkken bildirim yine gelir."; });
+            }
           }
         }
       } else {
@@ -1391,7 +1398,12 @@ view.addEventListener("click", (e) => {
   }
   if (e.target.closest("#predChip")) { openPredictions(); return; }
   if (e.target.closest("#ligJoin")) { joinLeague(); return; }
-  if (e.target.closest("#ligRename")) { state.lig = null; render(); return; }
+  if (e.target.closest("#ligRename")) {
+    if (window.lig) window.lig.logout();
+    state.signedIn = false; state.league = null;
+    render();
+    return;
+  }
   if (e.target.closest("#openPicks")) { openPicks(); return; }
   const lrow = e.target.closest("[data-liguser]");
   if (lrow) { openLeagueUser(lrow.dataset.liguser); return; }
@@ -1401,9 +1413,10 @@ view.addEventListener("click", (e) => {
   if (card) openMatch(card.dataset.match);
 });
 
-async function joinWithName(name, code) {
-  await window.lig.join(name, code);
-  state.lig = { name, member: true };
+async function loginToLeague(username, pin, code) {
+  await window.lig.login(username, pin, code);
+  state.signedIn = true;
+  state.lig = { name: username };
   store.set("lig", state.lig);
   // mevcut yerel tahminleri buluta taşı (başlamamış maçlar geçerli sayılır)
   for (const [mid, p] of Object.entries(state.preds)) {
@@ -1416,30 +1429,30 @@ async function joinWithName(name, code) {
 }
 
 async function joinLeague() {
-  const input = $("#ligName");
-  const codeInput = $("#ligCode");
+  const name = ($("#ligName").value || "").trim();
+  const pin = ($("#ligPin").value || "").trim();
+  const code = ($("#ligCode").value || "").trim();
   const err = $("#ligErr");
-  const name = (input.value || "").trim();
-  const code = (codeInput.value || "").trim();
   if (name.length < 2) { err.textContent = "En az 2 karakterlik bir ad gir."; return; }
+  if (pin.length < 4) { err.textContent = "PIN en az 4 hane olmalı."; return; }
   if (!code) { err.textContent = "Davet kodunu gir."; return; }
   const btn = $("#ligJoin");
-  btn.textContent = "Katılıyor...";
+  btn.textContent = "Giriş yapılıyor...";
   try {
-    await joinWithName(name, code);
+    await loginToLeague(name, pin, code);
     await loadLeague(true);
     render();
   } catch (ex) {
-    btn.textContent = "Lige Katıl";
+    btn.textContent = "Gir / Katıl";
     err.textContent = ex && ex.message === "bad-code"
       ? "Davet kodu yanlış. Lig kurucusundan doğru kodu al."
-      : "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
+      : "Bağlanılamadı, tekrar dene. (" + (ex && ex.message ? ex.message : "ağ hatası") + ")";
   }
 }
 
 /* ============ İlk açılış karşılaması ============ */
 function maybeOnboard() {
-  if (store.get("onboarded", false) || state.lig) return;
+  if (store.get("onboarded", false) || state.signedIn) return;
   const ob = document.createElement("div");
   ob.id = "onboard";
   ob.innerHTML = `
@@ -1453,10 +1466,12 @@ function maybeOnboard() {
         <li>🏅 Liderlik tablosunda arkadaşlarınla yarış</li>
         <li>🔔 Gol ve maç bildirimleri al</li>
       </ul>
-      <input id="obName" type="text" maxlength="20" placeholder="Takma adın (ligde görünecek)" autocomplete="nickname">
+      <input id="obName" type="text" maxlength="20" placeholder="Kullanıcı adın (ligde görünecek)" autocomplete="username">
+      <input id="obPin" type="password" maxlength="32" placeholder="PIN belirle (en az 4 hane)" autocomplete="new-password" inputmode="numeric">
       <input id="obCode" type="text" maxlength="40" placeholder="Davet kodu" autocomplete="off" autocapitalize="off">
       <button id="obJoin" class="pred-save">Başla 🚀</button>
       <div class="pred-note" id="obErr"></div>
+      <div class="pred-note">PIN'ini not et: başka cihazda ya da verin silinirse ad + PIN ile aynı hesaba dönersin.</div>
       <button class="link-btn ob-skip" id="obSkip">Şimdilik atla, sadece skorları izleyeceğim</button>
     </div>`;
   document.body.appendChild(ob);
@@ -1469,15 +1484,17 @@ function maybeOnboard() {
     }
     if (!e.target.closest("#obJoin")) return;
     const name = ($("#obName").value || "").trim();
+    const pin = ($("#obPin").value || "").trim();
     const code = ($("#obCode").value || "").trim();
     const err = $("#obErr");
     if (name.length < 2) { err.textContent = "En az 2 karakterlik bir ad gir."; return; }
+    if (pin.length < 4) { err.textContent = "PIN en az 4 hane olmalı."; return; }
     if (!code) { err.textContent = "Davet kodunu gir (lig kurucusundan al)."; return; }
     const btn = $("#obJoin");
     btn.textContent = "Katılıyor...";
     try {
       if (!window.lig) await new Promise((r) => window.addEventListener("lig-ready", r, { once: true }));
-      await joinWithName(name, code);
+      await loginToLeague(name, pin, code);
       store.set("onboarded", true);
       ob.remove();
       loadLeague(true).then(() => { if (state.tab === "league") render(); }).catch(() => {});
@@ -1487,7 +1504,7 @@ function maybeOnboard() {
       btn.textContent = "Başla 🚀";
       err.textContent = ex && ex.message === "bad-code"
         ? "Davet kodu yanlış. Lig kurucusundan doğru kodu al."
-        : "Bağlanılamadı, tekrar dene. (" + (ex && ex.code ? ex.code : "ağ hatası") + ")";
+        : "Bağlanılamadı, tekrar dene. (" + (ex && ex.message ? ex.message : "ağ hatası") + ")";
     }
   });
 }
@@ -1662,10 +1679,18 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
+// oturum durumunu kontrol et (custom token kalıcıdır; sayfa kapanıp açılınca giriş sürer)
+async function checkSession() {
+  if (!window.lig) { await new Promise((r) => window.addEventListener("lig-ready", r, { once: true })); }
+  try { state.signedIn = await window.lig.signedIn(); } catch { state.signedIn = false; }
+  if (state.tab === "league") render();
+  maybeOnboard();
+}
+
 (async () => {
   view.innerHTML = skeletonMatches(7);
   await refreshForTab(true);
   loadStandings().catch(() => {});
   setInterval(poll, 10_000);
-  maybeOnboard();
+  checkSession();
 })();

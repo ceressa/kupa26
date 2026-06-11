@@ -1,4 +1,4 @@
-const CACHE = "kupa26-v10";
+const CACHE = "kupa26-v11";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "lig.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-180.png"];
 
 self.addEventListener("install", (e) => {
