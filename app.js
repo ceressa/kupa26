@@ -100,6 +100,24 @@ async function fetchJSON(url) {
   return r.json();
 }
 
+function haptic(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
+}
+
+// güvenli takım rengi (okunur kontrast için fazla koyu/açıkları kırp)
+function teamColor(hex) {
+  if (!hex || !/^[0-9a-f]{6}$/i.test(hex)) return null;
+  return "#" + hex;
+}
+
+function skeletonMatches(n) {
+  let s = '<div class="sk-day"></div>';
+  for (let i = 0; i < (n || 6); i++) {
+    s += `<div class="sk-card"><div class="sk-line sk-w40"></div><div class="sk-score"></div><div class="sk-line sk-w40"></div></div>`;
+  }
+  return `<div class="skeleton">${s}</div>`;
+}
+
 /* Maç verisini normalize et */
 function normMatch(ev) {
   const c = ev.competitions && ev.competitions[0];
@@ -113,8 +131,8 @@ function normMatch(ev) {
     state: st.type ? st.type.state : "pre",          // pre | in | post
     detail: st.type ? (st.type.shortDetail || st.type.detail || "") : "",
     clock: st.displayClock || "",
-    home: { id: home.team.id, name: trName(home.team), logo: home.team.logo, score: home.score, winner: !!home.winner, tbd: isTBD(home.team) },
-    away: { id: away.team.id, name: trName(away.team), logo: away.team.logo, score: away.score, winner: !!away.winner, tbd: isTBD(away.team) },
+    home: { id: home.team.id, name: trName(home.team), logo: home.team.logo, color: home.team.color, score: home.score, winner: !!home.winner, tbd: isTBD(home.team) },
+    away: { id: away.team.id, name: trName(away.team), logo: away.team.logo, color: away.team.color, score: away.score, winner: !!away.winner, tbd: isTBD(away.team) },
     venue: c.venue ? (c.venue.fullName || "") : "",
     city: c.venue && c.venue.address ? [c.venue.address.city, c.venue.address.country].filter(Boolean).join(", ") : "",
     round: roundOf(ev.date)
@@ -217,8 +235,15 @@ function diffAndNotify(matches) {
   const snap = state.snapshot;
   const next = {};
   const canNotify = state.notif.enabled && typeof Notification !== "undefined" && Notification.permission === "granted";
+  const firstRun = !Object.keys(snap).length;
   for (const m of matches) {
     next[m.id] = { h: m.home.score, a: m.away.score, st: m.state };
+    const prevAny = snap[m.id];
+    // gol anında titreşim (bildirim izni olmasa da, uygulama açıkken)
+    if (!firstRun && prevAny && m.state !== "pre" &&
+        (Number(m.home.score) > Number(prevAny.h ?? 0) || Number(m.away.score) > Number(prevAny.a ?? 0))) {
+      if (state.notif.scope !== "favs" || involvesFav(m)) haptic([60, 40, 90]);
+    }
     if (!canNotify) continue;
     if (state.notif.scope === "favs" && !involvesFav(m)) continue;
     const prev = snap[m.id];
@@ -254,7 +279,10 @@ function updateLiveBadge() {
 /* ============ Görünümler ============ */
 function teamRowHTML(t, extraClass) {
   const cls = ["mc-team", extraClass, t.winner ? "winner" : "", t.tbd ? "tbd" : ""].filter(Boolean).join(" ");
-  const img = t.logo && !t.tbd ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : "";
+  const col = teamColor(t.color);
+  const img = t.logo && !t.tbd
+    ? `<span class="mc-logo"${col ? ` style="box-shadow:inset 0 -3px 0 ${col}"` : ""}><img src="${esc(t.logo)}" alt="" loading="lazy"></span>`
+    : "";
   return `<div class="${cls}">${img}<span class="name">${esc(t.name)}</span></div>`;
 }
 
@@ -276,7 +304,8 @@ function matchCardHTML(m) {
     const badge = sc === null ? "" : sc === 3 ? ` <b class="pp pp3">+3</b>` : sc === 1 ? ` <b class="pp pp1">+1</b>` : ` <b class="pp pp0">0</b>`;
     predHTML = `<div class="mc-meta">🎯 Tahminin: ${p.h} - ${p.a}${badge}</div>`;
   }
-  return `<div class="match-card ${fav ? "fav" : ""} ${live ? "live" : ""}" data-match="${m.id}">
+  const sig = m.state === "pre" ? "" : `${m.home.score}-${m.away.score}`;
+  return `<div class="match-card ${fav ? "fav" : ""} ${live ? "live" : ""}" data-match="${m.id}" data-scoresig="${esc(sig)}">
     ${teamRowHTML(m.home, "home")}
     <div class="mc-mid">${mid}</div>
     ${teamRowHTML(m.away, "away")}
@@ -304,7 +333,7 @@ function heroHTML(m) {
 }
 
 function renderMatches() {
-  if (!state.matches.length) { view.innerHTML = loadingHTML(); return; }
+  if (!state.matches.length) { view.innerHTML = skeletonMatches(7); return; }
   let html = "";
   const now = Date.now();
   const todayK = dayKey(now);
@@ -356,6 +385,7 @@ function renderMatches() {
   }
   view.innerHTML = html;
   startCountdowns();
+  flashScoreChanges();
 
   // ilk açılışta bugüne kaydır
   if (!renderMatches._scrolled) {
@@ -366,6 +396,26 @@ function renderMatches() {
       window.scrollBy(0, -70);
     }
   }
+}
+
+// skor değişen kartların skorunu yanıp söndür (gol anı vurgusu)
+function flashScoreChanges() {
+  const prev = flashScoreChanges._prev || {};
+  const next = {};
+  document.querySelectorAll(".match-card[data-scoresig]").forEach((card) => {
+    const id = card.dataset.match;
+    const sig = card.dataset.scoresig;
+    next[id] = sig;
+    if (sig && prev[id] !== undefined && prev[id] !== sig) {
+      const scoreEl = card.querySelector(".mc-score");
+      if (scoreEl) {
+        scoreEl.classList.remove("score-flash");
+        void scoreEl.offsetWidth;
+        scoreEl.classList.add("score-flash");
+      }
+    }
+  });
+  flashScoreChanges._prev = next;
 }
 
 function startCountdowns() {
@@ -502,6 +552,7 @@ function picksScore(picksMap) {
 function savePickLocalAndCloud(key, data) {
   state.picks[key] = { ...data };
   store.set("picks", state.picks);
+  haptic(8);
   if (state.lig && window.lig) {
     window.lig.savePick(key, data).then(() => { state.leagueAt = 0; }).catch(() => {});
   }
@@ -694,6 +745,42 @@ function render() {
   else if (state.tab === "league") renderLeague();
 }
 
+/* ============ Maç zenginleştirme yardımcıları ============ */
+// Amerikan bahis oranını örtük olasılığa çevir
+function mlToProb(ml) {
+  const n = Number(ml);
+  if (!n) return 0;
+  return n < 0 ? (-n) / (-n + 100) : 100 / (n + 100);
+}
+// pickcenter'dan vigsiz kazanma ihtimalleri {home, draw, away} yüzde
+function winProbs(j) {
+  const pc = (j.pickcenter && j.pickcenter[0]) || null;
+  if (!pc) return null;
+  let h = 0, d = 0, a = 0;
+  if (pc.homeTeamOdds && pc.homeTeamOdds.moneyLine != null) h = mlToProb(pc.homeTeamOdds.moneyLine);
+  if (pc.awayTeamOdds && pc.awayTeamOdds.moneyLine != null) a = mlToProb(pc.awayTeamOdds.moneyLine);
+  if (pc.drawOdds && pc.drawOdds.moneyLine != null) d = mlToProb(pc.drawOdds.moneyLine);
+  const sum = h + d + a;
+  if (sum <= 0) return null;
+  return { home: Math.round((h / sum) * 100), draw: Math.round((d / sum) * 100), away: Math.round((a / sum) * 100) };
+}
+// bir takımın oynanmış maçlarından son form (en yeni en solda): [{r:'G'|'B'|'M', label}]
+function teamForm(teamId, limit) {
+  const played = state.matches
+    .filter((m) => m.state === "post" && (String(m.home.id) === String(teamId) || String(m.away.id) === String(teamId)))
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, limit || 5);
+  return played.map((m) => {
+    const isHome = String(m.home.id) === String(teamId);
+    const gf = Number(isHome ? m.home.score : m.away.score);
+    const ga = Number(isHome ? m.away.score : m.home.score);
+    const opp = isHome ? m.away.name : m.home.name;
+    let r = "B";
+    if (gf > ga) r = "G"; else if (gf < ga) r = "M";
+    return { r, label: `${opp} ${gf}-${ga}` };
+  });
+}
+
 /* ============ Maç detayı ============ */
 async function openMatch(id, silent) {
   if (!silent) openSheet(loadingHTML());
@@ -748,6 +835,23 @@ async function openMatch(id, silent) {
       html += `<div class="md-section"><h3>🎯 Tahminin</h3><div class="pred-result">${myPred.h} - ${myPred.a}${badge}</div></div>`;
     }
 
+    // kazanma ihtimali (bahis oranlarından, vigsiz)
+    const wp = winProbs(j);
+    if (wp) {
+      html += `<div class="md-section"><h3>📊 Kazanma İhtimali</h3>
+        <div class="wp-bar">
+          <div class="wp-seg wp-h" style="width:${wp.home}%">${wp.home >= 12 ? wp.home + "%" : ""}</div>
+          <div class="wp-seg wp-d" style="width:${wp.draw}%">${wp.draw >= 12 ? wp.draw + "%" : ""}</div>
+          <div class="wp-seg wp-a" style="width:${wp.away}%">${wp.away >= 12 ? wp.away + "%" : ""}</div>
+        </div>
+        <div class="wp-legend">
+          <span><i class="wp-dot wp-h"></i>${esc(trName(home.team))} ${wp.home}%</span>
+          <span><i class="wp-dot wp-d"></i>Beraberlik ${wp.draw}%</span>
+          <span><i class="wp-dot wp-a"></i>${esc(trName(away.team))} ${wp.away}%</span>
+        </div>
+      </div>`;
+    }
+
     // olaylar: goller ve kartlar
     const details = (comp.details || []).filter((d) => d.scoringPlay || d.redCard || d.yellowCard);
     if (details.length) {
@@ -767,6 +871,20 @@ async function openMatch(id, silent) {
         </div>`;
       }
       html += `</div>`;
+    }
+
+    // dakika dakika anlatım (varsa)
+    const commentary = (j.commentary || []).filter((c) => c.text);
+    if (commentary.length) {
+      const items = commentary.slice(0, 60).map((c) => {
+        const min = c.time && c.time.displayValue ? c.time.displayValue : "";
+        const goal = /goal|scores/i.test(c.text || "") && !/no goal|disallow/i.test(c.text || "");
+        return `<div class="comm-row ${goal ? "goal" : ""}">
+          <span class="comm-min">${esc(min)}</span>
+          <span class="comm-text">${goal ? "⚽ " : ""}${esc(c.text)}</span>
+        </div>`;
+      }).join("");
+      html += `<div class="md-section"><h3>📝 Dakika Dakika</h3><div class="comm-list">${items}</div></div>`;
     }
 
     // istatistikler
@@ -792,6 +910,31 @@ async function openMatch(id, silent) {
         </div>`;
       }
       if (stats) html += `<div class="md-section"><h3>İstatistikler</h3>${stats}</div>`;
+    }
+
+    // form (oynanmış maçlardan) - turnuva ilerleyince dolar
+    const hForm = teamForm(home.team.id), aForm = teamForm(away.team.id);
+    if (hForm.length || aForm.length) {
+      const formHTML = (team, form) => `<div class="form-col">
+        <div class="form-team">${team.logos && team.logos[0] ? `<img src="${esc(team.logos[0].href)}" alt="">` : ""}${esc(trName(team))}</div>
+        <div class="form-dots">${form.length ? form.map((f) => `<span class="form-dot f-${f.r}" title="${esc(f.label)}">${f.r}</span>`).join("") : '<span class="form-none">-</span>'}</div>
+      </div>`;
+      html += `<div class="md-section"><h3>📈 Son Form</h3><div class="form-cols">${formHTML(home.team, hForm)}${formHTML(away.team, aForm)}</div></div>`;
+    }
+
+    // aralarındaki son maçlar (H2H)
+    const h2h = (j.headToHeadGames || [])[0];
+    const h2hEvents = (h2h && h2h.events) || [];
+    if (h2hEvents.length) {
+      const rowsH = h2hEvents.slice(0, 6).map((g) => {
+        const d = new Date(g.gameDate);
+        return `<div class="h2h-row">
+          <span class="h2h-date">${d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "2-digit" })}</span>
+          <span class="h2h-score">${esc(g.homeTeamScore ?? "")} - ${esc(g.awayTeamScore ?? "")}</span>
+          <span class="h2h-comp">${esc(g.leagueName || g.competitionName || "")}</span>
+        </div>`;
+      }).join("");
+      html += `<div class="md-section"><h3>🆚 Aralarındaki Son Maçlar</h3>${rowsH}</div>`;
     }
 
     // kadrolar
@@ -831,6 +974,7 @@ async function openMatch(id, silent) {
         if (isNaN(h) || isNaN(a) || h < 0 || a < 0 || h > 20 || a > 20) { save.textContent = "Geçerli skor gir"; return; }
         state.preds[save.dataset.predMatch] = { h, a };
         store.set("preds", state.preds);
+        haptic(12);
         save.textContent = "Kaydedildi ✓";
         if (state.lig && window.lig) {
           window.lig.savePred(save.dataset.predMatch, h, a)
@@ -1143,8 +1287,13 @@ function closeSheet() {
 /* ============ Olaylar ============ */
 document.querySelectorAll(".tab").forEach((b) => {
   b.addEventListener("click", () => {
+    if (state.tab === b.dataset.tab) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    haptic(8);
     document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
     state.tab = b.dataset.tab;
+    view.classList.remove("view-anim");
+    void view.offsetWidth;
+    view.classList.add("view-anim");
     render();
     refreshForTab();
   });
@@ -1375,6 +1524,44 @@ async function poll() {
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshForTab(); });
 
+/* ============ Aşağı çekip yenile ============ */
+(function setupPullToRefresh() {
+  const ind = document.createElement("div");
+  ind.id = "ptr";
+  ind.innerHTML = `<div class="ptr-spin"></div>`;
+  document.body.appendChild(ind);
+  let startY = 0, pulling = false, dist = 0;
+  const TH = 70;
+  window.addEventListener("touchstart", (e) => {
+    if (window.scrollY > 2 || !$("#sheetOverlay").classList.contains("hidden")) { pulling = false; return; }
+    startY = e.touches[0].clientY; pulling = true; dist = 0;
+  }, { passive: true });
+  window.addEventListener("touchmove", (e) => {
+    if (!pulling) return;
+    dist = e.touches[0].clientY - startY;
+    if (dist > 0) {
+      const pull = Math.min(dist * 0.5, 90);
+      ind.style.transform = `translateY(${pull}px)`;
+      ind.style.opacity = Math.min(pull / TH, 1);
+      ind.classList.toggle("ready", pull >= TH);
+    }
+  }, { passive: true });
+  window.addEventListener("touchend", async () => {
+    if (!pulling) return;
+    pulling = false;
+    const trigger = dist * 0.5 >= TH;
+    ind.style.transform = "";
+    ind.style.opacity = "";
+    if (trigger) {
+      haptic(12);
+      ind.classList.add("refreshing");
+      try { await refreshForTab(true); } finally { ind.classList.remove("refreshing", "ready"); }
+    } else {
+      ind.classList.remove("ready");
+    }
+  }, { passive: true });
+})();
+
 /* ============ Başlat ============ */
 applyTheme();
 matchMedia("(prefers-color-scheme: light)").addEventListener("change", applyTheme);
@@ -1384,7 +1571,7 @@ if ("serviceWorker" in navigator) {
 }
 
 (async () => {
-  view.innerHTML = loadingHTML();
+  view.innerHTML = skeletonMatches(7);
   await refreshForTab(true);
   loadStandings().catch(() => {});
   setInterval(poll, 10_000);
