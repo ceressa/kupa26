@@ -2,7 +2,7 @@
 
 2026 FIFA Dünya Kupası takip uygulaması. Canlı skor, fikstür, grup puan durumları, eleme ağacı, gol krallığı, maç detayları (kadrolar, olaylar, istatistikler) ve gol bildirimleri.
 
-- **Tamamen ücretsiz**: API anahtarı, kayıt, abonelik yok. Veri ESPN'in halka açık (resmi olmayan) API'sinden gelir.
+- **Tamamen ücretsiz**: API anahtarı, kayıt, abonelik yok. Veri halka açık bir spor verisi ucundan gelir.
 - **Taşınabilir**: Klasörü kopyala, her bilgisayarda aynı şekilde çalışır. Build, npm, kurulum yok.
 - **PWA**: Telefona uygulama gibi kurulur (iOS + Android), çevrimdışı kabuk önbelleği var.
 - **Kişisel**: Favori takımlar (varsayılan: Türkiye), bildirim kapsamı ve tema uygulama içinden ayarlanır. Ayarlar cihazda saklanır.
@@ -49,4 +49,5 @@ Bildirimler uygulama **açıkken** çalışır (sunucu olmadığı için arka pl
 
 - Saatler otomatik olarak cihazın saat dilimine göre gösterilir (Türkiye'de TSİ).
 - Canlı maç varken veri ~35 saniyede bir, yoksa 5 dakikada bir yenilenir.
-- ESPN API'si resmi olmayan, halka açık bir uçtur; ESPN değiştirirse uygulamanın güncellenmesi gerekebilir. Kişisel kullanım içindir.
+- Veri kaynağı resmi olmayan, halka açık bir uçtur; kaynak değişirse uygulamanın güncellenmesi gerekebilir. Kişisel kullanım içindir.
+- Yapımcı: Ufuk Celikeloglu

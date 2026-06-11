@@ -20,12 +20,18 @@
     <svg class="brand-mark" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
       <defs>
         <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#f5cd5a"/><stop offset="1" stop-color="#c69626"/>
+          <stop offset="0" stop-color="#f7d162"/><stop offset="1" stop-color="#c18e21"/>
         </linearGradient>
       </defs>
-      <circle cx="16" cy="15" r="12" fill="none" stroke="url(#gold)" stroke-width="3"/>
-      <circle cx="16" cy="15" r="7" fill="#f5f8fc"/>
-      <polygon points="16,11 19.3,13.4 18,17.2 14,17.2 12.7,13.4" fill="#102036"/>
+      <circle cx="16" cy="16" r="11.5" fill="none" stroke="url(#gold)" stroke-width="3"/>
+      <polygon points="16,2.2 17.1,5.1 20.2,5.3 17.8,7.3 18.6,10.3 16,8.6 13.4,10.3 14.2,7.3 11.8,5.3 14.9,5.1" fill="#f7d162"/>
+      <circle cx="16" cy="16" r="7" fill="#f8fafd"/>
+      <polygon points="16,12.3 18.8,14.4 17.7,17.7 14.3,17.7 13.2,14.4" fill="#122038"/>
+      <g stroke="#122038" stroke-width="0.7">
+        <line x1="16" y1="12.3" x2="16" y2="9.4"/><line x1="18.8" y1="14.4" x2="21.2" y2="13"/>
+        <line x1="17.7" y1="17.7" x2="19.3" y2="20"/><line x1="14.3" y1="17.7" x2="12.7" y2="20"/>
+        <line x1="13.2" y1="14.4" x2="10.8" y2="13"/>
+      </g>
     </svg>
     <span>Kupa<b>26</b></span>
   </div>
@@ -33,6 +39,9 @@
     <span id="liveBadge" class="live-badge hidden"><span class="live-dot"></span>CANLI</span>
     <button id="btnRefresh" class="icon-btn" title="Yenile" aria-label="Yenile">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"/></svg>
+    </button>
+    <button id="btnFavs" class="icon-btn" title="Favori Takımlar" aria-label="Favori Takımlar">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M12 3l2.9 5.9 6.1.9-4.5 4.4 1 6L12 17.8 6.5 20.2l1-6L3 9.8l6.1-.9z"/></svg>
     </button>
     <button id="btnSettings" class="icon-btn" title="Ayarlar" aria-label="Ayarlar">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
@@ -67,7 +76,12 @@
 
 <div id="sheetOverlay" class="sheet-overlay hidden">
   <div id="sheet" class="sheet" role="dialog" aria-modal="true">
-    <div class="sheet-grip"></div>
+    <div class="sheet-handle" id="sheetHandle">
+      <div class="sheet-grip"></div>
+      <button id="sheetClose" class="sheet-close" aria-label="Kapat" title="Kapat">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
     <div id="sheetContent" class="sheet-content"></div>
   </div>
 </div>

@@ -1347,22 +1347,42 @@ function openPredictions() {
   };
 }
 
-/* ============ Ayarlar ============ */
-function renderSettings() {
+/* ============ Favori Takımlar (ayrı ekran) ============ */
+function renderFavorites() {
   const teams = state.teamsCache || [];
-  const chips = teams.map((t) =>
+  const ordered = [...teams].sort((a, b) => (a.id === "465" ? -1 : b.id === "465" ? 1 : a.name.localeCompare(b.name, "tr")));
+  const chips = ordered.map((t) =>
     `<button class="team-chip ${state.favs.includes(t.id) ? "on" : ""}" data-team="${t.id}">
       ${t.logo ? `<img src="${esc(t.logo)}" alt="">` : ""}<span>${esc(t.name)}</span>
     </button>`).join("");
+  const html = `
+    <div class="set-title">⭐ Favori Takımların</div>
+    <p class="ob-hint" style="margin:0 0 12px">Seçtiğin takımların maçları öne çıkar, bildirim alırsın. İstediğin kadar seçebilirsin.</p>
+    <div class="team-grid">${chips || '<div class="empty-state">Takım listesi yüklenemedi, internetini kontrol et.</div>'}</div>`;
+  openSheet(html);
+  $("#sheetContent").onclick = (e) => {
+    const chip = e.target.closest(".team-chip");
+    if (!chip) return;
+    const id = chip.dataset.team;
+    if (state.favs.includes(id)) state.favs = state.favs.filter((x) => x !== id);
+    else state.favs.push(id);
+    store.set("favs", state.favs);
+    chip.classList.toggle("on");
+    haptic(6);
+    syncPushProfile();
+    if (state.tab === "matches" || state.tab === "groups") render();
+  };
+}
 
+/* ============ Ayarlar ============ */
+function renderSettings() {
   const notifSupported = "Notification" in window;
   const perm = notifSupported ? Notification.permission : "denied";
 
   const html = `
     <div class="set-title">Ayarlar</div>
     <div class="set-section">
-      <h3>Favori Takımlar</h3>
-      <div class="team-grid">${chips || '<div class="empty-state">Takım listesi için önce Gruplar sekmesini aç.</div>'}</div>
+      <button class="picks-cta" id="openFavs">⭐ Favori Takımların<small>Takımlarını seç, maçları öne çıksın</small></button>
     </div>
     <div class="set-section">
       <h3>Bildirimler</h3>
@@ -1400,21 +1420,11 @@ function renderSettings() {
         <button data-theme="light" class="${state.theme === "light" ? "on" : ""}">Açık</button>
       </div>
     </div>
-    <div class="attribution">Veri: ESPN (resmi olmayan halka açık API)<br>Kupa26 · kişisel kullanım için</div>`;
+    <div class="attribution">Kupa 26<br>Yapımcı: Ufuk Celikeloglu</div>`;
   openSheet(html);
 
   $("#sheetContent").onclick = async (e) => {
-    const chip = e.target.closest(".team-chip");
-    if (chip) {
-      const id = chip.dataset.team;
-      if (state.favs.includes(id)) state.favs = state.favs.filter((x) => x !== id);
-      else state.favs.push(id);
-      store.set("favs", state.favs);
-      chip.classList.toggle("on");
-      syncPushProfile();
-      render();
-      return;
-    }
+    if (e.target.closest("#openFavs")) { renderFavorites(); return; }
     if (e.target.closest("#swNotif")) {
       const sw = e.target.closest("#swNotif");
       if (!("Notification" in window)) { alert("Bu tarayıcı bildirim desteklemiyor."); return; }
@@ -1484,7 +1494,11 @@ function applyTheme() {
 /* ============ Sheet ============ */
 function openSheet(html) {
   clearTimeout(openMatch._timer);
+  const sheet = $("#sheet");
+  sheet.classList.remove("closing", "dragging");
+  sheet.style.transform = "";
   $("#sheetContent").onclick = null;
+  $("#sheetContent").scrollTop = 0;
   $("#sheetContent").innerHTML = html;
   $("#sheetOverlay").classList.remove("hidden");
   document.body.style.overflow = "hidden";
@@ -1492,8 +1506,16 @@ function openSheet(html) {
 function closeSheet() {
   clearTimeout(openMatch._timer);
   openMatch._id = null;
-  $("#sheetOverlay").classList.add("hidden");
-  document.body.style.overflow = "";
+  const sheet = $("#sheet");
+  // aşağı kayarak kapanma animasyonu
+  sheet.classList.add("closing");
+  sheet.style.transform = "translateY(100%)";
+  setTimeout(() => {
+    $("#sheetOverlay").classList.add("hidden");
+    sheet.classList.remove("closing");
+    sheet.style.transform = "";
+    document.body.style.overflow = "";
+  }, 200);
 }
 
 /* ============ Olaylar ============ */
@@ -1720,10 +1742,54 @@ function openLeagueUser(uid) {
 }
 
 $("#sheetOverlay").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeSheet(); });
+$("#sheetClose").addEventListener("click", closeSheet);
 $("#btnSettings").addEventListener("click", async () => {
   if (!state.teamsCache) { try { await loadStandings(); } catch {} }
   renderSettings();
 });
+$("#btnFavs").addEventListener("click", async () => {
+  if (!state.teamsCache) { try { await loadStandings(); } catch {} }
+  renderFavorites();
+});
+
+/* aşağı sürükleyerek sheet'i kapat */
+(function setupSheetDrag() {
+  const handle = $("#sheetHandle");
+  const sheet = $("#sheet");
+  const content = $("#sheetContent");
+  let startY = 0, dy = 0, dragging = false;
+
+  function start(y, fromHandle) {
+    // içerik en üstteyse ya da tutamaçtan başlıyorsa sürüklemeye izin ver
+    if (!fromHandle && content.scrollTop > 0) return;
+    dragging = true; startY = y; dy = 0;
+    sheet.classList.add("dragging");
+  }
+  function move(y, e) {
+    if (!dragging) return;
+    dy = y - startY;
+    if (dy < 0) dy = 0;
+    if (dy > 0 && e && e.cancelable) e.preventDefault();
+    sheet.style.transform = `translateY(${dy}px)`;
+  }
+  function end() {
+    if (!dragging) return;
+    dragging = false;
+    sheet.classList.remove("dragging");
+    if (dy > 90) { closeSheet(); }
+    else { sheet.style.transform = ""; }
+  }
+
+  handle.addEventListener("touchstart", (e) => start(e.touches[0].clientY, true), { passive: true });
+  content.addEventListener("touchstart", (e) => start(e.touches[0].clientY, false), { passive: true });
+  sheet.addEventListener("touchmove", (e) => move(e.touches[0].clientY, e), { passive: false });
+  sheet.addEventListener("touchend", end, { passive: true });
+
+  // masaüstü: tutamaçtan fare ile sürükleme
+  handle.addEventListener("mousedown", (e) => { start(e.clientY, true); e.preventDefault(); });
+  window.addEventListener("mousemove", (e) => { if (dragging) move(e.clientY, null); });
+  window.addEventListener("mouseup", end);
+})();
 $("#btnRefresh").addEventListener("click", async () => {
   const btn = $("#btnRefresh");
   btn.classList.add("spinning");
