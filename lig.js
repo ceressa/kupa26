@@ -3,8 +3,13 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDocs, collection, collectionGroup, serverTimestamp
+  getFirestore, doc, setDoc, getDocs, collection, collectionGroup, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getMessaging, getToken, isSupported } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging.js";
+
+// Firebase Console > Proje Ayarlari > Cloud Messaging > Web Push sertifikalari > Anahtar cifti
+// Buraya o "Anahtar cifti" degerini yapistir (B... ile baslar). Bos kalirsa arka plan bildirimi devre disi.
+const VAPID_KEY = "";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAkmaq0nFi4322Qm7DlyFe0_7aNg8Ck4bE",
@@ -33,8 +38,33 @@ async function ensureSignedIn() {
   return user;
 }
 
+let messaging = null;
+
 window.lig = {
   myUid() { return user ? user.uid : null; },
+
+  pushAvailable() { return !!VAPID_KEY; },
+
+  // arka plan push'u ac: izin iste, token al, kullanici dokumanina yaz
+  async enablePush() {
+    if (!VAPID_KEY) throw new Error("no-vapid");
+    if (!(await isSupported().catch(() => false))) throw new Error("unsupported");
+    const u = await ensureSignedIn();
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") throw new Error("denied");
+    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    if (!messaging) messaging = getMessaging(app);
+    const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) throw new Error("no-token");
+    await setDoc(doc(db, "users", u.uid), { fcmTokens: arrayUnion(token) }, { merge: true });
+    return token;
+  },
+
+  // favori takimlar ve bildirim tercihlerini buluta yaz (push yonlendirmesi icin)
+  async saveProfile(favs, prefs) {
+    const u = await ensureSignedIn();
+    await setDoc(doc(db, "users", u.uid), { favs: (favs || []).map(String), notifPrefs: prefs || {} }, { merge: true });
+  },
 
   // takma adla lige katil (ya da adi guncelle)
   async join(name) {

@@ -489,6 +489,13 @@ function leagueScore(predsMap) {
   return { pts, exact, played, total };
 }
 
+// favori + bildirim tercihlerini buluta yaz (push yönlendirmesi için)
+function syncPushProfile() {
+  if (!window.lig || !state.notif.enabled) return;
+  const prefs = { scope: state.notif.scope || "favs", goals: true, starts: true, ends: true, reminders: true };
+  window.lig.saveProfile(state.favs, prefs).catch(() => {});
+}
+
 async function loadLeague(force) {
   if (!window.lig || !state.lig) return;
   const now = Date.now();
@@ -1109,6 +1116,7 @@ function openTeam(teamId) {
       else state.favs.push(id);
       store.set("favs", state.favs);
       ft.textContent = state.favs.includes(id) ? "⭐ Favorilerden çıkar" : "☆ Favorilere ekle";
+      syncPushProfile();
       render();
       return;
     }
@@ -1254,15 +1262,18 @@ function renderSettings() {
     <div class="set-section">
       <h3>Bildirimler</h3>
       <div class="toggle-row">
-        <div>Maç bildirimleri<small>Gol, maç başlangıcı ve sonucu</small></div>
+        <div>Maç bildirimleri<small>Gol, maç başlangıcı, sonucu ve hatırlatma</small></div>
         <div class="switch ${state.notif.enabled && perm === "granted" ? "on" : ""}" id="swNotif"></div>
       </div>
       <div class="seg" id="segScope">
-        <button data-scope="favs" class="${state.notif.scope === "favs" ? "on" : ""}">Sadece favoriler</button>
+        <button data-scope="favs" class="${state.notif.scope === "favs" ? "on" : ""}">Favori + tahminlerim</button>
         <button data-scope="all" class="${state.notif.scope === "all" ? "on" : ""}">Tüm maçlar</button>
       </div>
+      <div class="notif-warn" id="pushStatus">${window.lig && window.lig.pushAvailable && window.lig.pushAvailable()
+        ? "🔔 Açıkken uygulama kapalıyken bile bildirim gelir (arka plan)."
+        : "ℹ️ Uygulama açıkken bildirim/titreşim gelir. Arka plan bildirimi için kurulum tamamlanınca aktifleşir."}</div>
       ${perm === "denied" && notifSupported ? `<div class="notif-warn">⚠️ Bildirim izni engellenmiş. Tarayıcı/site ayarlarından izin vermen gerekiyor.</div>` : ""}
-      <div class="notif-warn">📱 iPhone'da bildirim için: Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile kur, uygulamayı oradan aç. Bildirimler uygulama açıkken gelir (iOS 16.4+).</div>
+      <div class="notif-warn">📱 iPhone'da: Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile kur, uygulamayı oradan aç (iOS 16.4+).</div>
     </div>
     <div class="set-section">
       <h3>Görünüm</h3>
@@ -1283,6 +1294,7 @@ function renderSettings() {
       else state.favs.push(id);
       store.set("favs", state.favs);
       chip.classList.toggle("on");
+      syncPushProfile();
       render();
       return;
     }
@@ -1292,7 +1304,16 @@ function renderSettings() {
       if (!state.notif.enabled || Notification.permission !== "granted") {
         const p = await Notification.requestPermission();
         state.notif.enabled = p === "granted";
-        if (p === "granted") showNotif("🔔 Bildirimler açık", "Gol ve maç bildirimleri buradan gelecek.", "test");
+        if (p === "granted") {
+          showNotif("🔔 Bildirimler açık", "Gol ve maç bildirimleri buradan gelecek.", "test");
+          // arka plan push'u da kaydet (varsa) + profili buluta yaz
+          if (window.lig && window.lig.pushAvailable && window.lig.pushAvailable()) {
+            const ps = $("#pushStatus");
+            window.lig.enablePush()
+              .then(() => { syncPushProfile(); if (ps) ps.textContent = "✅ Arka plan bildirimi aktif (uygulama kapalıyken de gelir)."; })
+              .catch((err) => { if (ps) ps.textContent = "⚠️ Arka plan bildirimi kurulamadı (" + (err && err.message ? err.message : "hata") + "). Açıkken bildirim yine gelir."; });
+          }
+        }
       } else {
         state.notif.enabled = false;
       }
@@ -1305,6 +1326,7 @@ function renderSettings() {
       state.notif.scope = scopeBtn.dataset.scope;
       store.set("notif", state.notif);
       document.querySelectorAll("#segScope button").forEach((b) => b.classList.toggle("on", b === scopeBtn));
+      syncPushProfile();
       return;
     }
     const themeBtn = e.target.closest("#segTheme button");
@@ -1388,6 +1410,7 @@ async function joinWithName(name) {
   for (const [key, p] of Object.entries(state.picks)) {
     try { await window.lig.savePick(key, { ...p }); } catch {}
   }
+  syncPushProfile();
 }
 
 async function joinLeague() {

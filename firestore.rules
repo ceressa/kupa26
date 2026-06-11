@@ -4,9 +4,12 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if request.auth != null;
       allow create, update: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.name is string
-        && request.resource.data.name.size() >= 2
-        && request.resource.data.name.size() <= 20;
+        && (!('name' in request.resource.data) ||
+            (request.resource.data.name is string &&
+             request.resource.data.name.size() >= 2 &&
+             request.resource.data.name.size() <= 20))
+        && (!('fcmTokens' in request.resource.data) || request.resource.data.fcmTokens is list)
+        && (!('favs' in request.resource.data) || request.resource.data.favs is list);
       match /preds/{matchId} {
         allow read: if request.auth != null;
         allow create, update: if request.auth != null && request.auth.uid == uid
