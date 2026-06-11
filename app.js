@@ -557,8 +557,20 @@ async function loadLeague(force) {
   if (!window.lig || !state.signedIn) return;
   const now = Date.now();
   if (!force && state.league && now - state.leagueAt < 60_000) return;
-  state.league = await window.lig.fetchLeague();
-  state.leagueAt = now;
+  try {
+    state.league = await window.lig.fetchLeague();
+    state.leagueAt = now;
+    state.leagueErr = null;
+  } catch (e) {
+    state.leagueErr = e;
+    const code = (e && (e.code || e.message)) || "";
+    // geçersiz/eski oturum (üyelik yok): çıkış yaptır, giriş ekranına dön
+    if (/permission|unauthenticated|insufficient/i.test(code)) {
+      try { await window.lig.logout(); } catch {}
+      state.signedIn = false;
+    }
+    throw e;
+  }
 }
 
 /* ============ Turnuva tahminleri (grup çıkanları + şampiyon) ============ */
@@ -852,9 +864,29 @@ function renderLeague() {
       </div>`;
     return;
   }
-  if (!state.league) { view.innerHTML = loadingHTML(); return; }
-
   const me = window.lig.myUid();
+  const myName = (state.lig && state.lig.name) || "Sen";
+  const profileBar = (rankTxt, ptsTxt) => `
+    <div class="profile-bar" data-liguser="${esc(me || "")}">
+      <div class="pf-avatar">${esc((myName[0] || "?").toLocaleUpperCase("tr"))}</div>
+      <div class="pf-info">
+        <div class="pf-name">${esc(myName)} <span class="me-tag">sen</span></div>
+        <div class="pf-sub">${esc(rankTxt)}${ptsTxt ? " · " + esc(ptsTxt) : ""}</div>
+      </div>
+      <button class="pf-logout" id="ligRename">Çıkış</button>
+    </div>`;
+
+  if (!state.league) {
+    if (state.leagueErr) {
+      view.innerHTML = profileBar("Profilini görmek için dokun") +
+        emptyHTML("📡", "Lig yüklenemedi. İnternet bağlantını kontrol edip yenile.") +
+        `<div style="text-align:center"><button class="pred-save" id="ligRetry" style="max-width:200px;display:inline-block">Tekrar dene</button></div>`;
+      return;
+    }
+    view.innerHTML = profileBar("Yükleniyor...") + loadingHTML();
+    return;
+  }
+
   const rows = state.league
     .map((u) => {
       const score = leagueScore(u.preds);
@@ -863,8 +895,13 @@ function renderLeague() {
     })
     .sort((a, b) => b.grand - a.grand || b.score.exact - a.score.exact || b.score.total - a.score.total);
 
-  let html = `
-    <button class="picks-cta" id="openPicks">🏆 Turnuva Tahminlerin<small>Grup çıkanları ve şampiyonu seç · gruplar başlamadan kilitlenir</small></button>
+  const myIdx = rows.findIndex((u) => u.uid === me);
+  const myRow = myIdx >= 0 ? rows[myIdx] : null;
+  const rankTxt = myRow ? `${myIdx + 1}. sıra / ${rows.length}` : "Henüz sıralamada değilsin";
+  const ptsTxt = myRow ? `${myRow.grand} puan` : "";
+
+  let html = profileBar(rankTxt, ptsTxt) +
+    `<button class="picks-cta" id="openPicks">🏆 Turnuva Tahminlerin<small>Grup çıkanları ve şampiyonu seç · gruplar başlamadan kilitlenir</small></button>
     <div class="section-title">🏅 Tahmin Ligi · ${rows.length} oyuncu</div>`;
   rows.forEach((u, i) => {
     const mine = u.uid === me;
@@ -877,7 +914,7 @@ function renderLeague() {
       <div><div class="scorer-goals">${u.grand}</div><div class="scorer-sub">puan</div></div>
     </div>`;
   });
-  html += `<div class="attribution">Bu cihazdan çıkış yap: <button class="link-btn" id="ligRename">çıkış</button><br>Başka cihazda aynı ad + PIN ile girersen aynı hesap.</div>`;
+  html += `<div class="attribution">Başka cihazda aynı ad + PIN ile girersen aynı hesap.</div>`;
   view.innerHTML = html;
 }
 
@@ -1646,6 +1683,7 @@ view.addEventListener("click", (e) => {
     return;
   }
   if (e.target.closest("#openPicks")) { navOpen(() => openPicks()); return; }
+  if (e.target.closest("#ligRetry")) { state.leagueErr = null; state.league = null; render(); refreshForTab(true); return; }
   const lrow = e.target.closest("[data-liguser]");
   if (lrow) { const id = lrow.dataset.liguser; navOpen(() => openLeagueUser(id)); return; }
   const trow = e.target.closest("[data-teampage]");
@@ -1877,10 +1915,13 @@ async function refreshForTab(force) {
     else if (state.tab === "groups") { await loadStandings(force); }
     else if (state.tab === "scorers") { await loadScorers(force); }
     else if (state.tab === "league") { await loadMatches(); await loadLeague(force); }
-    render();
   } catch (err) {
-    if (!state.matches.length && state.tab !== "groups") view.innerHTML = emptyHTML("📡", "Veri alınamadı. İnternet bağlantını kontrol edip yenile.");
+    if (!state.matches.length && state.tab !== "groups" && state.tab !== "league") {
+      view.innerHTML = emptyHTML("📡", "Veri alınamadı. İnternet bağlantını kontrol edip yenile.");
+      return;
+    }
   }
+  render();
 }
 
 /* ============ Döngü ============ */

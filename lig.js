@@ -33,6 +33,11 @@ const authReady = new Promise((resolve) => {
 // oturum acik mi? (custom token ile giris yapilmis kullanici)
 async function currentUser() {
   await authReady;
+  // eski sistemden kalan anonim oturumlari temizle (uyelik yok, okuma reddedilir)
+  if (user && user.isAnonymous) {
+    try { await signOut(auth); } catch {}
+    user = null;
+  }
   return user;
 }
 // yazma islemleri icin giris sart; degilse hata
