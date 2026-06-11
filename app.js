@@ -1904,14 +1904,18 @@ function maybeOnboard() {
 }
 
 function openLeagueUser(uid) {
-  const u = (state.league || []).find((x) => x.uid === uid);
-  if (!u) return;
   const mine = uid === window.lig.myUid();
+  let u = (state.league || []).find((x) => x.uid === uid);
+  if (!u && mine) u = { uid, name: (state.lig && state.lig.name) || "Sen", preds: {}, picks: {} };
+  if (!u) return;
+  // kendi profilinde yerel veri her zaman en güncel (az önce yapılan tahmin/bahis dahil)
+  const srcPreds = mine ? state.preds : (u.preds || {});
+  const srcPicks = mine ? state.picks : (u.picks || {});
   const now = Date.now();
   const rows = state.matches
-    .filter((m) => u.preds[m.id])
+    .filter((m) => srcPreds[m.id])
     .map((m) => {
-      const p = u.preds[m.id];
+      const p = srcPreds[m.id];
       const started = new Date(m.date).getTime() <= now;
       const hidden = !started && !mine;
       const valid = predValid(m, p);
@@ -1927,8 +1931,8 @@ function openLeagueUser(uid) {
         ${hidden ? `<span class="pp ppwait">gizli</span>` : badge}
       </div>`;
     }).join("");
-  const s = leagueScore(u.preds);
-  const tour = picksScore(u.picks);
+  const s = leagueScore(srcPreds);
+  const tour = picksScore(srcPicks);
 
   // turnuva tahminleri özeti (kilitlenmemiş seçimler başkalarına gizli)
   const teamName = (id) => {
@@ -1936,12 +1940,12 @@ function openLeagueUser(uid) {
     return t ? t.name : "?";
   };
   let pickLines = "";
-  const cp = u.picks && u.picks["champion"];
+  const cp = srcPicks && srcPicks["champion"];
   if (cp && cp.team) {
     const show = mine || now >= tournamentLockTime();
     pickLines += `<div class="pick-line"><span>👑 Şampiyon</span><b>${show ? esc(teamName(cp.team)) : "🔒"}</b></div>`;
   }
-  for (const [key, p] of Object.entries(u.picks || {})) {
+  for (const [key, p] of Object.entries(srcPicks || {})) {
     if (!key.startsWith("group-") || (!p.first && !p.second)) continue;
     const letter = key.slice(6);
     const show = mine || now >= groupLockTime(letter);
@@ -1959,10 +1963,10 @@ function openLeagueUser(uid) {
     return parts.join(" · ");
   };
   let betLines = "";
-  const betMatches = state.matches.filter((m) => u.picks && u.picks["bet-" + m.id] && Object.keys(u.picks["bet-" + m.id]).some((k) => ["r", "ou", "kg", "ht"].includes(k)));
+  const betMatches = state.matches.filter((m) => srcPicks && srcPicks["bet-" + m.id] && Object.keys(srcPicks["bet-" + m.id]).some((k) => ["r", "ou", "kg", "ht"].includes(k)));
   betMatches.sort((a, b) => new Date(a.date) - new Date(b.date));
   for (const m of betMatches) {
-    const p = u.picks["bet-" + m.id];
+    const p = srcPicks["bet-" + m.id];
     const started = new Date(m.date).getTime() <= now;
     const hidden = !started && !mine;
     const bp = m.state === "post" ? betPoints(m, p).total : null;
