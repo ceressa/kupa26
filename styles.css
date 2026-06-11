@@ -68,7 +68,7 @@ body {
   letter-spacing: 0.3px;
 }
 .brand b { color: var(--accent); font-weight: 800; }
-.brand-mark { flex-shrink: 0; }
+.brand-mark { flex-shrink: 0; border-radius: 7px; display: block; }
 
 .header-right { display: flex; align-items: center; gap: 6px; }
 
