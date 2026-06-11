@@ -1949,6 +1949,30 @@ function openLeagueUser(uid) {
     pickLines += `<div class="pick-line"><span>${esc(letter)} Grubu</span><b>${txt}</b></div>`;
   }
 
+  // maç içi ek bahisler
+  const betLabel = (m, p) => {
+    const parts = [];
+    if (p.r) parts.push(p.r === "H" ? m.home.name : p.r === "A" ? m.away.name : "Beraberlik");
+    if (p.ou) parts.push(p.ou === "O" ? "2.5 Üst" : "2.5 Alt");
+    if (p.kg) parts.push(p.kg === "Y" ? "KG Var" : "KG Yok");
+    if (p.ht) parts.push("İY: " + (p.ht === "H" ? m.home.name : p.ht === "A" ? m.away.name : "Beraberlik"));
+    return parts.join(" · ");
+  };
+  let betLines = "";
+  const betMatches = state.matches.filter((m) => u.picks && u.picks["bet-" + m.id] && Object.keys(u.picks["bet-" + m.id]).some((k) => ["r", "ou", "kg", "ht"].includes(k)));
+  betMatches.sort((a, b) => new Date(a.date) - new Date(b.date));
+  for (const m of betMatches) {
+    const p = u.picks["bet-" + m.id];
+    const started = new Date(m.date).getTime() <= now;
+    const hidden = !started && !mine;
+    const bp = m.state === "post" ? betPoints(m, p).total : null;
+    const badge = bp === null ? `<span class="pp ppwait">${started ? "oynanıyor" : "bekliyor"}</span>` : `<span class="pp ${bp > 0 ? "pp3" : "pp0"}">+${bp}</span>`;
+    betLines += `<div class="pred-row" data-match="${m.id}">
+      <div class="pred-row-teams">${esc(m.home.name)} - ${esc(m.away.name)}<small>${hidden ? "🔒 gizli" : esc(betLabel(m, p))}</small></div>
+      ${hidden ? `<span class="pp ppwait">gizli</span>` : badge}
+    </div>`;
+  }
+
   openSheet(`
     <div class="set-title">🏅 ${esc(u.name)}${mine ? ' <span class="me-tag">sen</span>' : ""}</div>
     <div class="pred-summary">
@@ -1957,7 +1981,9 @@ function openLeagueUser(uid) {
       <div><b>${s.exact}</b><small>tam isabet</small></div>
     </div>
     ${pickLines ? `<div class="md-section"><h3>🏆 Turnuva Tahminleri</h3>${pickLines}</div>` : ""}
-    ${rows || emptyHTML("🎯", "Henüz maç tahmini yok.")}
+    ${rows ? `<div class="section-title">🎯 Skor Tahminleri</div>${rows}` : ""}
+    ${betLines ? `<div class="section-title">🎲 Maç Bahisleri</div>${betLines}` : ""}
+    ${!rows && !betLines && !pickLines ? emptyHTML("🎯", "Henüz tahmin yok.") : ""}
     ${mine ? "" : `<div class="pred-note">🔒 Tahminler maç/turnuva başlayana kadar gizlidir.</div>`}`);
   $("#sheetContent").onclick = (e) => {
     const card = e.target.closest("[data-match]");
