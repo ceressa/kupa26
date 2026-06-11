@@ -108,8 +108,17 @@ window.lig = {
     ]);
     const preds = {}, picks = {};
     predsSnap.forEach((d) => { const v = d.data(); preds[d.id] = { h: v.h, a: v.a }; });
-    picksSnap.forEach((d) => { const v = d.data(); const o = {}; for (const k of ["first", "second", "team"]) if (v[k] != null) o[k] = v[k]; picks[d.id] = o; });
+    picksSnap.forEach((d) => { const v = d.data(); const o = {}; for (const k of ["first", "second", "team", "r", "ou", "kg", "ht"]) if (v[k] != null) o[k] = v[k]; picks[d.id] = o; });
     return { preds, picks };
+  },
+
+  // devre arasi skorlari (ilk yari tahmini puanlamasi icin, fonksiyon yazar)
+  async fetchHtScores() {
+    await currentUser();
+    try {
+      const s = await getDoc(doc(db, "public", "htScores"));
+      return s.exists() ? (s.data().scores || {}) : {};
+    } catch { return {}; }
   },
 
   // tahmini buluta yaz; t sunucu damgasi (kurallar zorunlu kiliyor)

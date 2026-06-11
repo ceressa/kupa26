@@ -53,6 +53,8 @@ const state = {
   reminded: store.get("reminded", {}),
   league: null,
   leagueAt: 0,
+  htScores: {},
+  htAt: 0,
   notif: Object.assign({ enabled: false, scope: "favs", sound: "horn" }, store.get("notif", {})),
   theme: store.get("theme", "dark"),
   snapshot: store.get("snapshot", {}),
@@ -553,12 +555,20 @@ function syncPushProfile() {
   window.lig.saveProfile(state.favs, prefs).catch(() => {});
 }
 
+async function loadHt(force) {
+  if (!window.lig || !state.signedIn) return;
+  const now = Date.now();
+  if (!force && now - state.htAt < 120_000) return;
+  try { state.htScores = await window.lig.fetchHtScores(); state.htAt = now; } catch {}
+}
+
 async function loadLeague(force) {
   if (!window.lig || !state.signedIn) return;
   const now = Date.now();
   if (!force && state.league && now - state.leagueAt < 60_000) return;
   try {
-    state.league = await window.lig.fetchLeague();
+    const [lg] = await Promise.all([window.lig.fetchLeague(), loadHt(force)]);
+    state.league = lg;
     state.leagueAt = now;
     state.leagueErr = null;
   } catch (e) {
@@ -636,9 +646,59 @@ function picksScore(picksMap) {
       if (p.tMillis && p.tMillis > new Date(m.date).getTime()) continue;
       const w = koWinnerId(m);
       if (w && String(p.team) === w) pts += KO_PTS[m.round.key] || 1;
+    } else if (key.startsWith("bet-")) {
+      const m = state.matches.find((x) => String(x.id) === key.slice(4));
+      if (!m || m.state !== "post") continue;
+      if (p.tMillis && p.tMillis > new Date(m.date).getTime()) continue;
+      pts += betPoints(m, p).total;
     }
   }
   return pts;
+}
+
+// maç içi ek bahisler. r: 1X2, ou: alt/üst 2.5, kg: karşılıklı gol, ht: ilk yarı 1X2
+const BET_PTS = { r: 2, ou: 2, kg: 2, ht: 3 };
+function outcome(h, a) { return h > a ? "H" : h < a ? "A" : "D"; }
+function betPoints(m, p) {
+  const out = { r: null, ou: null, kg: null, ht: null, total: 0 };
+  if (!m || m.state !== "post") return out;
+  const h = Number(m.home.score), a = Number(m.away.score);
+  if (isNaN(h) || isNaN(a)) return out;
+  if (p.r) { const ok = p.r === outcome(h, a); out.r = ok; if (ok) out.total += BET_PTS.r; }
+  if (p.ou) { const ok = p.ou === (h + a > 2.5 ? "O" : "U"); out.ou = ok; if (ok) out.total += BET_PTS.ou; }
+  if (p.kg) { const ok = p.kg === (h > 0 && a > 0 ? "Y" : "N"); out.kg = ok; if (ok) out.total += BET_PTS.kg; }
+  if (p.ht) {
+    const ht = state.htScores && state.htScores[m.id];
+    if (ht) { const ok = p.ht === outcome(Number(ht.h), Number(ht.a)); out.ht = ok; if (ok) out.total += BET_PTS.ht; }
+  }
+  return out;
+}
+
+function betMarketsHTML(m, pre) {
+  const id = m.id;
+  const p = state.picks["bet-" + id] || {};
+  const res = m.state === "post" ? betPoints(m, p) : null;
+  const hN = m.home.name, aN = m.away.name;
+  const market = (field, title, pts, opts) => {
+    const sel = p[field];
+    const btns = opts.map((o) => {
+      const on = sel === o.v;
+      let cls = "";
+      if (res && on && res[field] !== null) cls = res[field] ? "hit" : "miss";
+      return `<button class="bet-opt ${on ? "on" : ""} ${cls}" ${pre ? "" : "disabled"} data-bet-field="${field}" data-bet-val="${o.v}">${esc(o.l)}</button>`;
+    }).join("");
+    const tag = res && sel && res[field] !== null ? (res[field] ? `<b class="pp pp3">+${pts}</b>` : `<b class="pp pp0">0</b>`) : `<small>+${pts}</small>`;
+    return `<div class="bet-market"><div class="bet-q">${esc(title)} ${tag}</div><div class="bet-opts bet-${opts.length}">${btns}</div></div>`;
+  };
+  let html = `<div class="md-section" data-bet-match="${esc(String(id))}"><h3>🎲 Diğer Tahminler</h3>`;
+  html += market("r", "Maç Sonucu", BET_PTS.r, [{ v: "H", l: hN }, { v: "D", l: "Beraberlik" }, { v: "A", l: aN }]);
+  html += market("ou", "Toplam Gol", BET_PTS.ou, [{ v: "O", l: "2.5 Üst" }, { v: "U", l: "2.5 Alt" }]);
+  html += market("kg", "Karşılıklı Gol", BET_PTS.kg, [{ v: "Y", l: "Var" }, { v: "N", l: "Yok" }]);
+  html += market("ht", "İlk Yarı", BET_PTS.ht, [{ v: "H", l: hN }, { v: "D", l: "Beraberlik" }, { v: "A", l: aN }]);
+  if (pre) html += `<div class="pred-note">Maç başlayınca kilitlenir. Doğru bilirsen yanındaki puanı alırsın.</div>`;
+  else if (m.state === "post" && p.ht && !(state.htScores && state.htScores[id])) html += `<div class="pred-note">İlk yarı sonucu birazdan işlenecek.</div>`;
+  html += `</div>`;
+  return html;
 }
 
 function savePickLocalAndCloud(key, data) {
@@ -1040,6 +1100,9 @@ async function openMatch(id, silent) {
       </div>`;
     }
 
+    // maç içi ek bahisler (1X2, alt/üst, KG, ilk yarı)
+    if (m) html += betMarketsHTML(m, pre);
+
     // kazanma ihtimali (bahis oranlarından, vigsiz)
     const wp = winProbs(j);
     if (wp) {
@@ -1178,6 +1241,16 @@ async function openMatch(id, silent) {
     sc.onclick = (e) => {
       const tp = e.target.closest("[data-teampage]");
       if (tp) { const tid = tp.dataset.teampage; navPush(() => openTeam(tid)); return; }
+      const betBtn = e.target.closest("[data-bet-field]");
+      if (betBtn && !betBtn.disabled) {
+        const mid = betBtn.closest("[data-bet-match]").dataset.betMatch;
+        const field = betBtn.dataset.betField, val = betBtn.dataset.betVal;
+        const cur = { ...(state.picks["bet-" + mid] || {}) };
+        if (cur[field] === val) delete cur[field]; else cur[field] = val;
+        savePickLocalAndCloud("bet-" + mid, cur);
+        openMatch(id, true);
+        return;
+      }
       const koBtn = e.target.closest("[data-ko-team]");
       if (koBtn && !koBtn.disabled) {
         const koKey = koBtn.closest("[data-ko-section]").dataset.koSection;

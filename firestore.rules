@@ -13,6 +13,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // herkese acik (uyeye) okunur veriler: devre arasi skorlari vb. Sadece fonksiyon yazar.
+    match /public/{doc} {
+      allow read: if request.auth != null && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+      allow write: if false;
+    }
+
     match /users/{uid} {
       allow read: if request.auth != null
         && exists(/databases/$(database)/documents/members/$(request.auth.uid));
