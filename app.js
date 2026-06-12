@@ -1802,15 +1802,21 @@ async function loginToLeague(username, pin, code) {
   state.signedIn = true;
   state.lig = { name: username };
   store.set("lig", state.lig);
-  // mevcut yerel tahminleri buluta taşı (başlamamış maçlar geçerli sayılır)
+  // önce buluttaki veriyi al (mevcut kayıtların zaman damgasını KORU; üstüne yazma)
+  let cloud = { preds: {}, picks: {} };
+  try { cloud = await window.lig.fetchMine(); } catch {}
+  // yalnızca bulutta OLMAYAN yerel tahminleri yükle (yeni cihazdan ilk giriş için)
   for (const [mid, p] of Object.entries(state.preds)) {
-    try { await window.lig.savePred(mid, p.h, p.a); } catch {}
+    if (!cloud.preds[mid]) { try { await window.lig.savePred(mid, p.h, p.a); } catch {} }
   }
   for (const [key, p] of Object.entries(state.picks)) {
-    try { await window.lig.savePick(key, { ...p }); } catch {}
+    if (!cloud.picks[key]) { try { await window.lig.savePick(key, { ...p }); } catch {} }
   }
-  // hesabın buluttaki tahminlerini yerel ekrana geri yükle
-  await pullMyData();
+  // bulut -> yerel (eksikleri doldur, bulut zaman damgalı kayıtlar önceliklidir)
+  for (const [mid, p] of Object.entries(cloud.preds)) state.preds[mid] = { h: p.h, a: p.a };
+  for (const [key, p] of Object.entries(cloud.picks)) state.picks[key] = { ...p };
+  store.set("preds", state.preds);
+  store.set("picks", state.picks);
   syncPushProfile();
 }
 
