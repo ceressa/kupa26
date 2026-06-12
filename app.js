@@ -555,6 +555,14 @@ function syncPushProfile() {
   window.lig.saveProfile(state.favs, prefs).catch(() => {});
 }
 
+// her açılışta: bildirim açık + izin verilmişse FCM token'ını yeniden kaydet (token değişebilir/eksik kalabilir)
+function ensurePushToken() {
+  if (!window.lig || !state.signedIn || !state.notif.enabled) return;
+  if (!(window.lig.pushAvailable && window.lig.pushAvailable())) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  window.lig.enablePush().then(() => syncPushProfile()).catch(() => {});
+}
+
 async function loadHt(force) {
   if (!window.lig || !state.signedIn) return;
   const now = Date.now();
@@ -1626,9 +1634,17 @@ function renderSettings() {
             if (!state.signedIn) {
               if (ps) ps.textContent = "ℹ️ Arka plan bildirimi için Lig sekmesinden giriş yap. Açıkken bildirim yine gelir.";
             } else {
+              if (ps) ps.textContent = "⏳ Cihaz kaydediliyor...";
               window.lig.enablePush()
-                .then(() => { syncPushProfile(); if (ps) ps.textContent = "✅ Arka plan bildirimi aktif (uygulama kapalıyken de gelir)."; })
-                .catch((err) => { if (ps) ps.textContent = "⚠️ Arka plan bildirimi kurulamadı (" + (err && err.message ? err.message : "hata") + "). Açıkken bildirim yine gelir."; });
+                .then(() => { syncPushProfile(); if (ps) ps.textContent = "✅ Arka plan bildirimi aktif, cihaz kayıtlı (uygulama kapalıyken de gol bildirimi gelir)."; })
+                .catch((err) => {
+                  const code = (err && err.message) || "hata";
+                  const msg = code === "unsupported" ? "Bu tarayıcı/cihaz arka plan bildirimini desteklemiyor. iPhone'da: Safari'de Paylaş → Ana Ekrana Ekle ile kurup oradan aç (iOS 16.4+)."
+                    : code === "denied" ? "Bildirim izni verilmedi. Tarayıcı/site ayarlarından izin ver."
+                    : code === "no-token" ? "Token alınamadı, tekrar dene (uygulamayı ana ekrandan açtığından emin ol)."
+                    : "Kurulamadı (" + code + ").";
+                  if (ps) ps.textContent = "⚠️ " + msg + " Uygulama açıkken bildirim yine gelir.";
+                });
             }
           }
         }
@@ -2049,7 +2065,7 @@ async function poll() {
   const anyLive = state.matches.some((m) => m.state === "in");
   const soon = state.matches.some((m) => m.state === "pre" && new Date(m.date) - Date.now() < 15 * 60 * 1000 && new Date(m.date) - Date.now() > -10 * 60 * 1000);
   const needFast = anyLive || soon;
-  const interval = needFast ? 35_000 : 300_000;
+  const interval = needFast ? 25_000 : 300_000;
   if (Date.now() - state.matchesAt >= interval) {
     try {
       await loadMatches(true);
@@ -2064,7 +2080,15 @@ async function poll() {
   }
 }
 
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshForTab(); });
+// öne gelince / odağa dönünce taze veri çek (mobilde arka planda zamanlayıcılar donar)
+function onForeground() {
+  if (document.hidden) return;
+  refreshForTab(true);
+  if (state.signedIn) ensurePushToken();
+}
+document.addEventListener("visibilitychange", onForeground);
+window.addEventListener("focus", onForeground);
+window.addEventListener("pageshow", onForeground);
 
 /* ============ Aşağı çekip yenile ============ */
 (function setupPullToRefresh() {
@@ -2116,7 +2140,7 @@ if ("serviceWorker" in navigator) {
 async function checkSession() {
   if (!window.lig) { await new Promise((r) => window.addEventListener("lig-ready", r, { once: true })); }
   try { state.signedIn = await window.lig.signedIn(); } catch { state.signedIn = false; }
-  if (state.signedIn) pullMyData();
+  if (state.signedIn) { pullMyData(); ensurePushToken(); }
   if (state.tab === "league") render();
   // onboarding favori grid'i için takım listesini hazırla
   if (!store.get("onboarded", false) && !state.signedIn && !state.teamsCache) {
