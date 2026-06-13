@@ -608,7 +608,7 @@ function tournamentLockTime() {
 // grup bitti mi? bittiyse [1.id, 2.id]
 function groupResult(letter) {
   const g = (state.standings || []).find((x) => groupLetterOf(x) === letter);
-  const entries = (g && g.standings && g.standings.entries) || [];
+  const entries = sortedEntries(g);
   if (entries.length < 2) return null;
   if (!entries.every((e) => statNum(e, "gamesPlayed", "GP") >= 3)) return null;
   return [String(entries[0].team.id), String(entries[1].team.id)];
@@ -667,6 +667,18 @@ function picksScore(picksMap) {
 // maç içi ek bahisler. r: 1X2, ou: alt/üst 2.5, kg: karşılıklı gol, ht: ilk yarı 1X2
 const BET_PTS = { r: 2, ou: 2, kg: 2, ht: 3 };
 function outcome(h, a) { return h > a ? "H" : h < a ? "A" : "D"; }
+
+// ESPN grup takımlarını sıralı vermiyor; rank'a (yoksa puan/averaj/attığı gol) göre sırala
+function sortedEntries(g) {
+  const entries = (g && g.standings && g.standings.entries) || [];
+  return [...entries].sort((a, b) => {
+    const ra = statNum(a, "rank"), rb = statNum(b, "rank");
+    if (ra && rb && ra !== rb) return ra - rb;
+    return statNum(b, "points", "P", "PTS") - statNum(a, "points", "P", "PTS")
+      || statNum(b, "pointDifferential", "GD") - statNum(a, "pointDifferential", "GD")
+      || statNum(b, "pointsFor", "GF") - statNum(a, "pointsFor", "GF");
+  });
+}
 function betPoints(m, p) {
   const out = { r: null, ou: null, kg: null, ht: null, total: 0 };
   if (!m || m.state !== "post") return out;
@@ -730,7 +742,7 @@ function renderGroups() {
   }
   let html = "";
   for (const g of groups) {
-    const entries = (g.standings && g.standings.entries) || [];
+    const entries = sortedEntries(g);
     const hasFav = entries.some((e) => state.favs.includes(String(e.team.id)));
     let rows = "";
     entries.forEach((e, i) => {
@@ -759,7 +771,7 @@ function renderGroups() {
   // üçüncüler sıralaması: 12 grubun 3.lerinden en iyi 8'i tur atlar
   const thirds = [];
   for (const g of state.standings) {
-    const entries = (g.standings && g.standings.entries) || [];
+    const entries = sortedEntries(g);
     if (entries[2]) thirds.push({ e: entries[2], group: (g.name || "").replace(/^Group\s+/i, "") });
   }
   if (thirds.length) {
@@ -1328,7 +1340,7 @@ async function openTeam(teamId) {
   // grup tablosu + takımın grup satırı
   let groupHTML = "", groupName = "", myEntry = null;
   for (const g of state.standings || []) {
-    const entries = (g.standings && g.standings.entries) || [];
+    const entries = sortedEntries(g);
     const idx = entries.findIndex((e) => String(e.team.id) === teamId);
     if (idx < 0) continue;
     myEntry = entries[idx];
