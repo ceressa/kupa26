@@ -13,16 +13,18 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// notification yuklu mesajlar tarayici tarafindan otomatik gosterilir;
-// bu handler veri-only mesajlar icin yedek.
+// mutlak ikon yolu (site /kupa26/ alt yolunda; goreli yol kok'e cozulup 404 olur -> beyaz kare)
+const ICON = new URL("icons/icon-192.png", self.registration.scope).href;
+const HOME = self.registration.scope;
+
+// SADECE-VERI mesaj geldiginde TEK bildirim goster (cift gosterimi engeller)
 messaging.onBackgroundMessage((payload) => {
-  const n = payload.notification || {};
-  if (!n.title) return;
-  self.registration.showNotification(n.title, {
-    body: n.body || "",
-    icon: "icons/icon-192.png",
-    badge: "icons/icon-192.png",
-    tag: (payload.data && payload.data.tag) || undefined
+  const d = payload.data || {};
+  if (!d.title) return;
+  self.registration.showNotification(d.title, {
+    body: d.body || "",
+    icon: ICON,
+    tag: d.tag || undefined
   });
 });
 
@@ -30,8 +32,8 @@ self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   e.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      if (list.length) return list[0].focus();
-      return self.clients.openWindow("./");
+      for (const c of list) { if (c.url.indexOf(HOME) === 0) return c.focus(); }
+      return self.clients.openWindow(HOME);
     })
   );
 });

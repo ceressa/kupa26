@@ -322,7 +322,9 @@ function diffAndNotify(matches) {
 }
 
 function showNotif(title, body, tag) {
-  const opts = { body, tag, icon: "icons/icon-192.png", badge: "icons/icon-192.png" };
+  // mutlak ikon yolu (site alt yolda; göreli yol beyaz kareye yol açıyor)
+  const icon = new URL("icons/icon-192.png", document.baseURI).href;
+  const opts = { body, tag, icon };
   if (navigator.serviceWorker && navigator.serviceWorker.ready) {
     navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, opts)).catch(() => { try { new Notification(title, opts); } catch {} });
   } else { try { new Notification(title, opts); } catch {} }
